@@ -1,184 +1,150 @@
 """Users, categories, catalog, shops and products."""
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    CheckConstraint,
-    Column,
-    DateTime,
-    Enum,
-    Float,
-    ForeignKey,
-    Index,
-    Integer,
-    LargeBinary,
-    String,
-    Table,
-    Text,
-    UniqueConstraint,
-)
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pydantic import Field, model_validator
 
-from app.core.database import Base, utcnow
+from app.core.database import utcnow
+from app.models.base import Document, GeoPoint, Timestamps
 from app.models.enums import InventoryReason, Role
 
 
-def str_enum(enum_cls, length: int = 24) -> Enum:
-    """Store a StrEnum as a VARCHAR with a CHECK constraint (portable across SQLite/Postgres)."""
-    return Enum(
-        enum_cls,
-        native_enum=False,
-        create_constraint=True,
-        length=length,
-        values_callable=lambda e: [m.value for m in e],
-        validate_strings=True,
-    )
+class User(Document, Timestamps):
+    """Collection `users`. Unique on email."""
 
-
-class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
-
-
-class User(TimestampMixin, Base):
-    __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(120))
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    phone: Mapped[str | None] = mapped_column(String(20))
-    password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[Role] = mapped_column(str_enum(Role, 16), default=Role.CUSTOMER, index=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
+    name: str
+    email: str
+    phone: str | None = None
+    password_hash: str
+    role: Role = Role.CUSTOMER
+    is_active: bool = True
+    last_login_at: datetime | None = None
     # Saved default location for "near me"
-    home_lat: Mapped[float | None] = mapped_column(Float)
-    home_lng: Mapped[float | None] = mapped_column(Float)
-    home_label: Mapped[str | None] = mapped_column(String(160))
-
-    shops: Mapped[list["Shop"]] = relationship(back_populates="owner")
+    home_lat: float | None = None
+    home_lng: float | None = None
+    home_label: str | None = None
 
 
-class Category(Base):
-    __tablename__ = "categories"
+class Category(Document):
+    """Collection `categories`. Small reference data, unique on slug."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    slug: Mapped[str] = mapped_column(String(60), unique=True)
-    name: Mapped[str] = mapped_column(String(80))
-    icon: Mapped[str] = mapped_column(String(60), default="Package")
-    description: Mapped[str | None] = mapped_column(String(255))
-    color_hue: Mapped[int] = mapped_column(Integer, default=250)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0)
-
-
-class CatalogItem(Base):
-    """Master product definition. Shop listings (Product) may link to one so prices can be compared."""
-
-    __tablename__ = "catalog_items"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    slug: Mapped[str] = mapped_column(String(120), unique=True)
-    name: Mapped[str] = mapped_column(String(200))
-    brand: Mapped[str | None] = mapped_column(String(80))
-    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), index=True)
-    subcategory: Mapped[str | None] = mapped_column(String(60), index=True)
-    unit: Mapped[str | None] = mapped_column(String(40))
-    mrp: Mapped[float | None] = mapped_column(Float)
-    typical_price: Mapped[float | None] = mapped_column(Float)
-    description: Mapped[str | None] = mapped_column(Text)
-    specs: Mapped[dict] = mapped_column(JSON, default=dict)
-    tags: Mapped[list] = mapped_column(JSON, default=list)
-    icon: Mapped[str] = mapped_column(String(60), default="Package")
-
-    category: Mapped[Category] = relationship()
+    slug: str
+    name: str
+    icon: str = "Package"
+    description: str | None = None
+    color_hue: int = 250
+    sort_order: int = 0
 
 
-shop_categories = Table(
-    "shop_categories",
-    Base.metadata,
-    Column("shop_id", ForeignKey("shops.id", ondelete="CASCADE"), primary_key=True),
-    Column("category_id", ForeignKey("categories.id", ondelete="CASCADE"), primary_key=True),
-)
+class CatalogItem(Document):
+    """Collection `catalog_items`. Master product definition; shop listings (Product) may link to
+    one so the same item can be compared across shops."""
+
+    slug: str
+    name: str
+    brand: str | None = None
+    category_id: int
+    subcategory: str | None = None
+    unit: str | None = None
+    mrp: float | None = None
+    typical_price: float | None = None
+    description: str | None = None
+    specs: dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
+    icon: str = "Package"
+
+    category: Category | None = Field(default=None, exclude=True)
 
 
-class Shop(TimestampMixin, Base):
-    __tablename__ = "shops"
-    __table_args__ = (
-        CheckConstraint("lat BETWEEN -90 AND 90", name="ck_shop_lat"),
-        CheckConstraint("lng BETWEEN -180 AND 180", name="ck_shop_lng"),
-        CheckConstraint("delivery_radius_km >= 0", name="ck_shop_radius"),
-        Index("ix_shops_lat_lng", "lat", "lng"),
-    )
+class Shop(Document, Timestamps):
+    """Collection `shops`. `location` is GeoJSON (2dsphere index) and `category_ids` embeds the
+    shop-to-category relation, so "shops near me selling X" is a single indexed query."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    name: Mapped[str] = mapped_column(String(160))
-    slug: Mapped[str] = mapped_column(String(180), unique=True)
-    tagline: Mapped[str | None] = mapped_column(String(160))
-    description: Mapped[str | None] = mapped_column(Text)
-    phone: Mapped[str | None] = mapped_column(String(20))
-    address_line: Mapped[str] = mapped_column(String(255))
-    locality: Mapped[str | None] = mapped_column(String(120), index=True)
-    city: Mapped[str] = mapped_column(String(80))
-    pincode: Mapped[str | None] = mapped_column(String(10))
-    lat: Mapped[float] = mapped_column(Float)
-    lng: Mapped[float] = mapped_column(Float)
-    opening_hours: Mapped[str | None] = mapped_column(String(80))
-    closed_on: Mapped[str | None] = mapped_column(String(40))
-    established_year: Mapped[int | None] = mapped_column(Integer)
+    owner_id: int
+    name: str
+    slug: str
+    tagline: str | None = None
+    description: str | None = None
+    phone: str | None = None
+    address_line: str
+    locality: str | None = None
+    city: str
+    pincode: str | None = None
+    location: GeoPoint
+    opening_hours: str | None = None
+    closed_on: str | None = None
+    established_year: int | None = None
 
-    offers_pickup: Mapped[bool] = mapped_column(Boolean, default=True)
-    offers_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
-    delivery_radius_km: Mapped[float] = mapped_column(Float, default=0)
-    delivery_fee: Mapped[float] = mapped_column(Float, default=0)
-    free_delivery_above: Mapped[float | None] = mapped_column(Float)
-    hold_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    offers_pickup: bool = True
+    offers_delivery: bool = False
+    delivery_radius_km: float = 0
+    delivery_fee: float = 0
+    free_delivery_above: float | None = None
+    hold_minutes: int = 30
 
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    image_path: Mapped[str | None] = mapped_column(String(255))
-    inventory_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    is_active: bool = True
+    is_verified: bool = False
+    image_path: str | None = None
+    inventory_updated_at: datetime | None = None
+    category_ids: list[int] = Field(default_factory=list)
+    # Computed on write: kept in step with `reviews` in the same transaction, so listing shops
+    # never needs to aggregate reviews.
+    rating_sum: int = 0
+    rating_count: int = 0
 
-    owner: Mapped[User] = relationship(back_populates="shops")
-    categories: Mapped[list[Category]] = relationship(secondary=shop_categories)
-    products: Mapped[list["Product"]] = relationship(back_populates="shop")
+    categories: list[Category] = Field(default_factory=list, exclude=True)
+    owner: User | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lat_lng_to_location(cls, data: Any) -> Any:
+        # Convenience for code that thinks in lat/lng: Shop(lat=.., lng=..).
+        if isinstance(data, dict) and "location" not in data and "lat" in data and "lng" in data:
+            data = dict(data)
+            data["location"] = GeoPoint.of(data.pop("lat"), data.pop("lng"))
+        return data
+
+    @property
+    def lat(self) -> float:
+        return self.location.lat
+
+    @property
+    def lng(self) -> float:
+        return self.location.lng
+
+    @property
+    def rating_avg(self) -> float | None:
+        return round(self.rating_sum / self.rating_count, 1) if self.rating_count else None
 
 
-class Product(TimestampMixin, Base):
-    """A shop's listing: its own price and stock for an item."""
+class Product(Document, Timestamps):
+    """Collection `products`. A shop's listing: its own price and stock for an item.
+    Unique on (shop_id, catalog_item_id) when linked to the catalog. Text-indexed for keyword search."""
 
-    __tablename__ = "products"
-    __table_args__ = (
-        CheckConstraint("price >= 0", name="ck_product_price"),
-        CheckConstraint("quantity >= 0", name="ck_product_qty"),
-        UniqueConstraint("shop_id", "catalog_item_id", name="uq_product_shop_catalog"),
-        Index("ix_products_shop_active", "shop_id", "is_active"),
-    )
+    shop_id: int
+    catalog_item_id: int | None = None
+    category_id: int
+    name: str
+    brand: str | None = None
+    sku: str | None = None
+    unit: str | None = None
+    description: str | None = None
+    specs: dict[str, Any] = Field(default_factory=dict)
+    keywords: str = ""  # tags + category words, part of the text index
+    icon: str = "Package"
+    image_path: str | None = None
+    price: float
+    mrp: float | None = None
+    quantity: int = 0
+    low_stock_threshold: int = 5
+    is_active: bool = True
+    stock_updated_at: datetime = Field(default_factory=utcnow)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
-    catalog_item_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_items.id"), index=True)
-    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), index=True)
-    name: Mapped[str] = mapped_column(String(200))
-    brand: Mapped[str | None] = mapped_column(String(80))
-    sku: Mapped[str | None] = mapped_column(String(60))
-    unit: Mapped[str | None] = mapped_column(String(40))
-    description: Mapped[str | None] = mapped_column(Text)
-    specs: Mapped[dict] = mapped_column(JSON, default=dict)
-    keywords: Mapped[str] = mapped_column(Text, default="")  # tags + category words, indexed by FTS5
-    icon: Mapped[str] = mapped_column(String(60), default="Package")
-    image_path: Mapped[str | None] = mapped_column(String(255))
-    price: Mapped[float] = mapped_column(Float, index=True)
-    mrp: Mapped[float | None] = mapped_column(Float)
-    quantity: Mapped[int] = mapped_column(Integer, default=0)
-    low_stock_threshold: Mapped[int] = mapped_column(Integer, default=5)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    stock_updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-
-    shop: Mapped[Shop] = relationship(back_populates="products")
-    category: Mapped[Category] = relationship()
-    catalog_item: Mapped[CatalogItem | None] = relationship()
+    shop: Shop | None = Field(default=None, exclude=True)
+    category: Category | None = Field(default=None, exclude=True)
+    catalog_item: CatalogItem | None = Field(default=None, exclude=True)
 
     @property
     def stock_status(self) -> str:
@@ -189,27 +155,14 @@ class Product(TimestampMixin, Base):
         return "in_stock"
 
 
-class InventoryEvent(Base):
-    """Audit log of every stock change. Powers 'inventory freshness' trust signals."""
+class InventoryEvent(Document):
+    """Collection `inventory_events`. Append-only audit log of every stock change; powers the
+    'inventory freshness' trust signals."""
 
-    __tablename__ = "inventory_events"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
-    delta: Mapped[int] = mapped_column(Integer)
-    quantity_after: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[InventoryReason] = mapped_column(str_enum(InventoryReason))
-    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-
-
-class TextEmbedding(Base):
-    """Cached sentence embeddings keyed by a hash of the embedded text (shared across identical listings)."""
-
-    __tablename__ = "text_embeddings"
-
-    text_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
-    model: Mapped[str] = mapped_column(String(120), primary_key=True)
-    dim: Mapped[int] = mapped_column(Integer)
-    vector: Mapped[bytes] = mapped_column(LargeBinary)
+    product_id: int
+    shop_id: int
+    delta: int
+    quantity_after: int
+    reason: InventoryReason
+    actor_id: int | None = None
+    created_at: datetime = Field(default_factory=utcnow)

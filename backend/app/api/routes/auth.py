@@ -1,23 +1,26 @@
 from fastapi import APIRouter, Response
-from sqlalchemy import select
+from pymongo.errors import DuplicateKeyError
 
 from app.core.config import settings
-from app.core.database import utcnow
+from app.core.database import Database, utcnow
 from app.core.deps import DB, CurrentUser, OptionalUser
 from app.core.errors import AppError, Conflict
 from app.core.security import create_access_token, hash_password, verify_password
-from app.models import Category, Role, Shop, User
+from app.models import Role, Shop, User
 from app.schemas.requests import LoginIn, ProfileUpdateIn, RegisterIn, RegisterShopIn
+from app.services.loaders import categories
 from app.services.meta import city_config
 from app.utils.text import slugify
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+EMAIL_TAKEN = Conflict("An account with this email already exists", code="email_taken")
 
-def user_out(user: User, db) -> dict:
+
+def user_out(user: User, db: Database) -> dict:
     shop = None
     if user.role == Role.OWNER:
-        s = db.scalars(select(Shop).where(Shop.owner_id == user.id).order_by(Shop.id)).first()
+        s = db.shops.find_one({"owner_id": user.id}, sort=[("_id", 1)])
         if s:
             shop = {"id": s.id, "slug": s.slug, "name": s.name}
     return {
@@ -45,18 +48,19 @@ def _start_session(response: Response, user: User) -> None:
     )
 
 
-def _ensure_email_free(db, email: str) -> None:
-    if db.scalar(select(User.id).where(User.email == email.lower())):
-        raise Conflict("An account with this email already exists", code="email_taken")
+def _ensure_email_free(db: Database, email: str) -> None:
+    if db.users.exists({"email": email.lower()}):
+        raise EMAIL_TAKEN
 
 
 @router.post("/register")
 def register(body: RegisterIn, response: Response, db: DB):
     _ensure_email_free(db, body.email)
-    user = User(name=body.name, email=body.email.lower(), phone=body.phone,
-                password_hash=hash_password(body.password), role=Role.CUSTOMER)
-    db.add(user)
-    db.commit()
+    try:
+        user = db.users.insert(User(name=body.name, email=body.email.lower(), phone=body.phone,
+                                    password_hash=hash_password(body.password), role=Role.CUSTOMER))
+    except DuplicateKeyError:  # two sign-ups raced: the unique index on email decides
+        raise EMAIL_TAKEN from None
     _start_session(response, user)
     return user_out(user, db)
 
@@ -64,34 +68,41 @@ def register(body: RegisterIn, response: Response, db: DB):
 @router.post("/register-shop")
 def register_shop(body: RegisterShopIn, response: Response, db: DB):
     _ensure_email_free(db, body.owner.email)
-    cats = db.scalars(select(Category).where(Category.slug.in_(body.shop.category_slugs))).all()
+    cats = [c for c in categories(db).values() if c.slug in set(body.shop.category_slugs)]
     if len(cats) != len(set(body.shop.category_slugs)):
         raise AppError("Choose categories from the list")
-    user = User(name=body.owner.name, email=body.owner.email.lower(), phone=body.owner.phone or body.shop.phone,
-                password_hash=hash_password(body.owner.password), role=Role.OWNER)
-    db.add(user)
-    db.flush()
+    password_hash = hash_password(body.owner.password)
     data = body.shop.model_dump(exclude={"category_slugs"})
     base = slugify(f"{body.shop.name} {body.shop.locality or ''}")
+    taken = {d["slug"] for d in db.shops.find_raw({"slug": {"$regex": f"^{base}(-\\d+)?$"}}, {"slug": 1})}
     slug, n = base, 2
-    while db.scalar(select(Shop.id).where(Shop.slug == slug)):
+    while slug in taken:
         slug, n = f"{base}-{n}", n + 1
-    shop = Shop(**data, owner_id=user.id, slug=slug, city=city_config()["name"], categories=cats,
-                inventory_updated_at=utcnow())
-    db.add(shop)
-    db.commit()
+
+    def create() -> User:
+        # The owner account and the shop are created together or not at all.
+        user = db.users.insert(User(name=body.owner.name, email=body.owner.email.lower(),
+                                    phone=body.owner.phone or body.shop.phone, password_hash=password_hash,
+                                    role=Role.OWNER))
+        db.shops.insert(Shop(**data, owner_id=user.id, slug=slug, city=city_config()["name"],
+                             category_ids=[c.id for c in cats], inventory_updated_at=utcnow()))
+        return user
+
+    try:
+        user = db.transaction(create)
+    except DuplicateKeyError:
+        raise EMAIL_TAKEN from None
     _start_session(response, user)
     return user_out(user, db)
 
 
 @router.post("/login")
 def login(body: LoginIn, response: Response, db: DB):
-    user = db.scalar(select(User).where(User.email == body.email.lower()))
+    user = db.users.find_one({"email": body.email.lower()})
     # Same message for unknown email and wrong password, so accounts cannot be enumerated.
     if not user or not verify_password(body.password, user.password_hash) or not user.is_active:
         raise AppError("Email or password is incorrect", code="invalid_credentials", status_code=401)
-    user.last_login_at = utcnow()
-    db.commit()
+    db.users.set(user, last_login_at=utcnow())
     _start_session(response, user)
     return user_out(user, db)
 
@@ -110,7 +121,7 @@ def me(user: OptionalUser, db: DB):
 
 @router.patch("/me")
 def update_me(body: ProfileUpdateIn, user: CurrentUser, db: DB):
-    for field, value in body.model_dump(exclude_unset=True).items():
-        setattr(user, field, value)
-    db.commit()
+    changes = body.model_dump(exclude_unset=True)
+    if changes:
+        db.users.set(user, **changes)
     return user_out(user, db)

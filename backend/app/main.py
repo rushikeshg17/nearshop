@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app.ai.semantic_index import index
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core.database import Database
 from app.core.errors import AppError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -30,16 +30,20 @@ async def lifespan(_: FastAPI):
         from app.jobs import start_scheduler
 
         scheduler = start_scheduler()
-    # Build the semantic index in the background so the first search is fast.
+    # Check the schema and build the semantic index in the background so startup stays instant.
     def warm():
         try:
-            with SessionLocal() as db:
-                index.ensure(db)
-            log.info("semantic index ready: %d listings via %s", len(index.product_ids), index.provider_name)
-        except Exception as exc:  # the app still works on keyword search
-            log.warning("semantic index warm-up failed: %s", exc)
+            from database.schema import ensure_schema
 
-    threading.Thread(target=warm, daemon=True).start()
+            db = Database()
+            ensure_schema(db.mongo)  # validators and indexes exist before the first write
+            index.ensure(db)
+            log.info("semantic index ready: %d listings via %s", len(index.product_ids), index.provider_name)
+        except Exception as exc:  # the app still serves keyword search
+            log.warning("warm-up failed: %s", exc)
+
+    if settings.warm_on_startup:
+        threading.Thread(target=warm, daemon=True).start()
     yield
     if scheduler:
         scheduler.shutdown(wait=False)

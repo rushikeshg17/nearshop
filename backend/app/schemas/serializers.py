@@ -1,4 +1,5 @@
-"""Model -> JSON dict helpers. Timestamps are emitted as ISO-8601 UTC with a trailing Z so
+"""Model -> JSON dict helpers. References (`product.category`, `reservation.shop`, ...) must be
+resolved first with app/services/loaders.py. Timestamps are emitted as ISO-8601 UTC with a trailing Z so
 browsers never mistake them for local time (important for 'updated 2 minutes ago')."""
 from datetime import datetime
 
@@ -19,7 +20,7 @@ def category_out(c: Category) -> dict:
             "description": c.description}
 
 
-def shop_brief(s: Shop, distance_km: float | None = None, rating: tuple[float | None, int] | None = None) -> dict:
+def shop_brief(s: Shop, distance_km: float | None = None) -> dict:
     hours = open_status(s.opening_hours, s.closed_on)
     return {
         "id": s.id,
@@ -41,18 +42,17 @@ def shop_brief(s: Shop, distance_km: float | None = None, rating: tuple[float | 
         "is_verified": s.is_verified,
         "image_url": media_url(s.image_path),
         "inventory_updated_at": iso(s.inventory_updated_at),
-        "rating_avg": rating[0] if rating else None,
-        "rating_count": rating[1] if rating else 0,
+        "rating_avg": s.rating_avg,
+        "rating_count": s.rating_count,
         "categories": [c.slug for c in s.categories],
     }
 
 
 def shop_detail(s: Shop, distance_km: float | None, reliability: dict) -> dict:
-    rating = (reliability["rating_avg"], reliability["rating_count"])
     rel = dict(reliability)
     rel["inventory_updated_at"] = iso(rel["inventory_updated_at"])
     return {
-        **shop_brief(s, distance_km, rating),
+        **shop_brief(s, distance_km),
         "description": s.description,
         "phone": s.phone,
         "address_line": s.address_line,

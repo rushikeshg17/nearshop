@@ -1,14 +1,12 @@
 from datetime import timedelta
 
-from app.core.database import SessionLocal, utcnow
-from app.models import Product, Reservation, SalesRecord
+from app.core.database import Database, utcnow
 from app.services.reservations import expire_due
 from tests.conftest import CENTER, HEADERS
 
 
 def stock(product_id: int) -> int:
-    with SessionLocal() as db:
-        return db.get(Product, product_id).quantity
+    return Database().products.get(product_id).quantity
 
 
 def test_reservation_happy_path_holds_stock_and_records_sale(customer, owner_a, ids):
@@ -27,8 +25,7 @@ def test_reservation_happy_path_holds_stock_and_records_sale(customer, owner_a, 
     assert r["status"] == "COMPLETED"
     assert stock(ids["tape"]) == before - 2  # the held units left with the customer
 
-    with SessionLocal() as db:
-        assert db.query(SalesRecord).filter_by(basket_id=r["code"], is_demo=False).count() == 1
+    assert Database().sales_history.count({"basket_id": r["code"], "is_demo": False}) == 1
 
     # One review per completed reservation.
     ok = customer.post("/api/reviews", json={"reservation_id": r["id"], "rating": 5}, headers=HEADERS)
@@ -85,12 +82,10 @@ def test_expiry_releases_held_stock(customer, owner_a, ids):
     r = customer.post("/api/reservations", json={"product_id": ids["tape"], "quantity": 3}, headers=HEADERS).json()
     owner_a.post(f"/api/owner/reservations/{r['id']}/confirm", json={}, headers=HEADERS)
     assert stock(ids["tape"]) == before - 3
-    with SessionLocal() as db:
-        res = db.get(Reservation, r["id"])
-        res.expires_at = utcnow() - timedelta(minutes=1)
-        db.commit()
-        expire_due(db)
-        assert db.get(Reservation, r["id"]).status.value == "EXPIRED"
+    db = Database()
+    db.reservations.set(db.reservations.get(r["id"]), expires_at=utcnow() - timedelta(minutes=1))
+    expire_due(db)
+    assert db.reservations.get(r["id"]).status.value == "EXPIRED"
     assert stock(ids["tape"]) == before
 
 

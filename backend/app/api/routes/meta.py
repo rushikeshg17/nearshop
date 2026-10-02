@@ -1,9 +1,8 @@
 from fastapi import APIRouter
-from sqlalchemy import func, select
 
 from app.core.deps import DB
-from app.models import Category, Product, Shop
 from app.schemas.serializers import category_out
+from app.services.loaders import categories
 from app.services.meta import city_config
 
 router = APIRouter(tags=["meta"])
@@ -12,26 +11,25 @@ router = APIRouter(tags=["meta"])
 @router.get("/meta")
 def meta(db: DB):
     city = city_config()
-    counts = dict(
-        db.execute(
-            select(Category.slug, func.count(Product.id))
-            .join(Product, Product.category_id == Category.id)
-            .where(Product.is_active.is_(True), Product.quantity > 0)
-            .group_by(Category.slug)
-        ).all()
+    # One pass over active listings gives the totals and the per-category in-stock counts.
+    by_category, shops = db.gather(
+        lambda: db.products.aggregate([
+            {"$match": {"is_active": True}},
+            {"$group": {"_id": "$category_id", "listings": {"$sum": 1},
+                        "in_stock": {"$sum": {"$cond": [{"$gt": ["$quantity", 0]}, 1, 0]}}}},
+        ]),
+        lambda: db.shops.count({"is_active": True}),
     )
-    categories = [
-        {**category_out(c), "in_stock_listings": counts.get(c.slug, 0)}
-        for c in db.scalars(select(Category).order_by(Category.sort_order, Category.name))
-    ]
+    counts = {r["_id"]: r for r in by_category}
     return {
         "city": city,
-        "categories": categories,
+        "categories": [
+            {**category_out(c), "in_stock_listings": counts.get(c.id, {}).get("in_stock", 0)}
+            for c in categories(db).values()
+        ],
         "stats": {
-            "shops": db.scalar(select(func.count()).select_from(Shop).where(Shop.is_active.is_(True))) or 0,
-            "listings": db.scalar(select(func.count()).select_from(Product).where(Product.is_active.is_(True))) or 0,
-            "in_stock": db.scalar(
-                select(func.count()).select_from(Product).where(Product.is_active.is_(True), Product.quantity > 0)
-            ) or 0,
+            "shops": shops,
+            "listings": sum(r["listings"] for r in by_category),
+            "in_stock": sum(r["in_stock"] for r in by_category),
         },
     }

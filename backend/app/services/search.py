@@ -1,7 +1,7 @@
 """NearShop search pipeline.
 
-    query -> normalise + synonyms -> keyword (SQLite FTS5 / BM25) + semantic (sentence embeddings)
-          -> location filter (bounding box + Haversine) -> availability / price / fulfilment filters
+    query -> normalise + synonyms -> keyword (MongoDB text index) + semantic (sentence embeddings)
+          -> location filter (2dsphere index + Haversine) -> availability / price / fulfilment filters
           -> hybrid relevance + proximity ranking -> group listings of the same item -> results
 
 Results are grouped by catalog item so a customer sees "Samsung 25W charger: 4 shops nearby
@@ -14,20 +14,21 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 
 from rapidfuzz import fuzz, process
-from sqlalchemy import func, select, text
-from sqlalchemy.orm import Session, selectinload
 
 from app.ai.semantic_index import index
-from app.models import CatalogItem, Category, Product, SearchEvent, Shop
+from app.core.database import Database
+from app.models import Product, SearchEvent, Shop
 from app.schemas.serializers import listing, shop_brief
-from app.services.reliability import ratings_for
-from app.utils.geo import bounding_box, haversine_km
-from app.utils.text import expand_synonyms, fts_escape_terms, normalize_query
+from app.services.loaders import categories, category_by_slug, with_categories, with_category
+from app.utils.geo import haversine_km, within_km
+from app.utils.text import expand_synonyms, normalize_query, search_tokens
 
 SEM_FLOOR, SEM_CEIL = 0.22, 0.62  # cosine range mapped to 0..1 for all-MiniLM-L6-v2
 SEM_MIN_MATCH = 0.34  # a listing with no keyword hit needs at least this much meaning overlap
 W_SEMANTIC, W_KEYWORD = 0.6, 0.4
 RELATIVE_CUTOFF = 0.42  # drop results far weaker than the best one
+# Search results never show these, so they are not fetched.
+LISTING_FIELDS = {"description": 0, "specs": 0}
 
 
 @dataclass
@@ -47,18 +48,13 @@ class SearchParams:
     page_size: int = 20
 
 
-def nearby_shops(db: Session, lat: float, lng: float, radius_km: float, fulfillment: str | None = None,
+def nearby_shops(db: Database, lat: float, lng: float, radius_km: float, fulfillment: str | None = None,
                  shop_id: int | None = None) -> dict[int, tuple[Shop, float]]:
-    min_lat, max_lat, min_lng, max_lng = bounding_box(lat, lng, radius_km)
-    stmt = (
-        select(Shop)
-        .options(selectinload(Shop.categories))
-        .where(Shop.is_active.is_(True), Shop.lat.between(min_lat, max_lat), Shop.lng.between(min_lng, max_lng))
-    )
+    query: dict = {"is_active": True, "location": within_km(lat, lng, radius_km)}
     if shop_id:
-        stmt = stmt.where(Shop.id == shop_id)
+        query["_id"] = shop_id
     out = {}
-    for s in db.scalars(stmt):
+    for s in with_categories(db, db.shops.find(query)):
         d = haversine_km(lat, lng, s.lat, s.lng)
         if d > radius_km:
             continue
@@ -70,48 +66,48 @@ def nearby_shops(db: Session, lat: float, lng: float, radius_km: float, fulfillm
     return out
 
 
-def keyword_scores(db: Session, terms: list[str]) -> dict[int, float]:
-    """BM25 over name/brand/keywords/description (weights 10/6/4/1). Higher = better."""
-    tokens = fts_escape_terms(terms)
+def keyword_scores(db: Database, terms: list[str]) -> dict[int, float]:
+    """Text-index relevance over name/brand/keywords/description (weights 10/6/4/1). Higher = better."""
+    tokens = search_tokens(terms)
     if not tokens:
         return {}
-    # prefix-match the last typed word so "chargi" still finds "charger"
-    tokens[-1] = tokens[-1] + "*"
-    expr = " OR ".join(dict.fromkeys(tokens))
-    rows = db.execute(
-        text("SELECT rowid, bm25(products_fts, 10.0, 6.0, 4.0, 1.0) FROM products_fts WHERE products_fts MATCH :q"),
-        {"q": expr},
-    ).all()
-    return {rid: -score for rid, score in rows}
+    # Prefix-match the word being typed, so "chargi" still finds "charger": the text index matches
+    # whole (stemmed) words, so the partial word is completed from the catalogue vocabulary.
+    last = tokens[-1]
+    if len(last) >= 3:
+        tokens += sorted(w for w in _vocabulary(db) if w.startswith(last) and w != last)[:8]
+    rows = db.products.find_raw({"$text": {"$search": " ".join(dict.fromkeys(tokens))}},
+                                {"score": {"$meta": "textScore"}})
+    return {r["_id"]: r["score"] for r in rows}
 
 
 def _norm_sem(sim: float) -> float:
     return min(max((sim - SEM_FLOOR) / (SEM_CEIL - SEM_FLOOR), 0.0), 1.0)
 
 
-def run_search(db: Session, p: SearchParams, user_id: int | None = None, log: bool = True) -> dict:
+def run_search(db: Database, p: SearchParams, user_id: int | None = None, log: bool = True) -> dict:
     norm = normalize_query(p.q) if p.q else ""
+    expanded = expand_synonyms(norm) if norm else []
+    category = category_by_slug(db, p.category)
     shops = nearby_shops(db, p.lat, p.lng, p.radius_km, p.fulfillment, p.shop_id)
 
-    stmt = select(Product).options(selectinload(Product.category)).where(
-        Product.is_active.is_(True), Product.shop_id.in_(list(shops) or [-1])
-    )
+    query: dict = {"is_active": True, "shop_id": {"$in": list(shops)}}
     if p.category:
-        stmt = stmt.join(Category, Product.category_id == Category.id).where(Category.slug == p.category)
-    if p.min_price is not None:
-        stmt = stmt.where(Product.price >= p.min_price)
-    if p.max_price is not None:
-        stmt = stmt.where(Product.price <= p.max_price)
+        query["category_id"] = category.id if category else -1
+    if p.min_price is not None or p.max_price is not None:
+        query["price"] = {**({"$gte": p.min_price} if p.min_price is not None else {}),
+                          **({"$lte": p.max_price} if p.max_price is not None else {})}
     if p.in_stock_only:
-        stmt = stmt.where(Product.quantity > 0)
-    products = db.scalars(stmt).all()
+        query["quantity"] = {"$gt": 0}
+    # Listings, keyword scores and semantic scores are independent: fetch them side by side.
+    products, kw, sem = db.gather(
+        lambda: with_category(db, db.products.find(query, projection=LISTING_FIELDS)) if shops else [],
+        lambda: keyword_scores(db, norm.split() + expanded) if norm else {},
+        lambda: index.query(db, norm) if norm else {},
+    )
 
     relevance: dict[int, float] = {}
-    expanded: list[str] = []
     if norm:
-        expanded = expand_synonyms(norm)
-        kw = keyword_scores(db, norm.split() + expanded)
-        sem = index.query(db, norm)
         kw_max = max((kw.get(pr.id, 0.0) for pr in products), default=0.0) or 1.0
         for pr in products:
             k = kw.get(pr.id, 0.0) / kw_max
@@ -126,13 +122,12 @@ def run_search(db: Session, p: SearchParams, user_id: int | None = None, log: bo
     else:
         relevance = {pr.id: 1.0 for pr in products}
 
-    ratings = ratings_for(db, list({pr.shop_id for pr in products}))
     shop_cache: dict[int, dict] = {}
 
     def shop_json(sid: int) -> dict:
         if sid not in shop_cache:
             s, d = shops[sid]
-            shop_cache[sid] = shop_brief(s, d, ratings.get(sid))
+            shop_cache[sid] = shop_brief(s, d)
         return shop_cache[sid]
 
     # Group listings of the same catalog item.
@@ -219,9 +214,10 @@ def run_search(db: Session, p: SearchParams, user_id: int | None = None, log: bo
             return {**corrected, "query": p.q, "corrected_from": p.q, "did_you_mean": None}
 
     if log and norm:
-        db.add(SearchEvent(user_id=user_id, query=p.q[:200], normalized_query=norm[:200], category_slug=p.category,
-                           results_count=total, lat=round(p.lat, 3), lng=round(p.lng, 3)))
-        db.commit()
+        # Logged after the response is on its way: analytics must not make search slower.
+        event = SearchEvent(user_id=user_id, query=p.q[:200], normalized_query=norm[:200], category_slug=p.category,
+                            results_count=total, lat=round(p.lat, 3), lng=round(p.lng, 3))
+        db.background(lambda: Database(db.mongo.name).search_history.insert(event))
 
     return {
         "query": p.q,
@@ -237,29 +233,33 @@ def run_search(db: Session, p: SearchParams, user_id: int | None = None, log: bo
         "groups": page_rows,
         "shops": sorted(pins.values(), key=lambda s: s["distance_km"]),
         "category_counts": dict(category_counts),
-        "engine": {"semantic": index.provider_name or "loading", "keyword": "sqlite-fts5-bm25"},
+        "engine": {"semantic": index.provider_name or "loading", "keyword": "mongodb-text-index"},
     }
 
 
 # ---------------------------------------------------------------- "did you mean"
 
-_vocab: set[str] = set()
+_vocab: dict[str, set[str]] = {}
 
 
-def _vocabulary(db: Session) -> set[str]:
-    global _vocab
-    if not _vocab:
+def _vocabulary(db: Database) -> set[str]:
+    """Every word customers could mean: catalogue names, brands, tags, category names and the
+    names of shop-specific listings. Cached per process; reset when listings change."""
+    key = db.mongo.name
+    if key not in _vocab:
         words: set[str] = set()
-        for name, brand, tags in db.execute(select(CatalogItem.name, CatalogItem.brand, CatalogItem.tags)):
-            for chunk in [name, brand or "", *(tags or [])]:
-                words.update(w for w in re.findall(r"[a-z]{3,}", chunk.lower()))
-        for (name,) in db.execute(select(Category.name)):
-            words.update(re.findall(r"[a-z]{3,}", name.lower()))
-        _vocab = words
-    return _vocab
+        for c in db.catalog_items.find_raw({}, {"name": 1, "brand": 1, "tags": 1}):
+            for chunk in [c["name"], c.get("brand") or "", *(c.get("tags") or [])]:
+                words.update(re.findall(r"[a-z]{3,}", chunk.lower()))
+        for c in db.products.find_raw({"catalog_item_id": None, "is_active": True}, {"name": 1, "keywords": 1}):
+            words.update(re.findall(r"[a-z]{3,}", f"{c['name']} {c.get('keywords') or ''}".lower()))
+        for c in categories(db).values():
+            words.update(re.findall(r"[a-z]{3,}", c.name.lower()))
+        _vocab[key] = words
+    return _vocab[key]
 
 
-def suggest_correction(db: Session, norm: str) -> str | None:
+def suggest_correction(db: Database, norm: str) -> str | None:
     vocab = _vocabulary(db)
     if not vocab:
         return None
@@ -280,58 +280,49 @@ def suggest_correction(db: Session, norm: str) -> str | None:
 
 # ---------------------------------------------------------------- suggestions
 
-def suggestions(db: Session, q: str, limit: int = 8) -> dict:
+def _top_queries(db: Database, match: dict, limit: int) -> list[str]:
+    return [r["_id"] for r in db.search_history.aggregate([
+        {"$match": match},
+        {"$group": {"_id": "$normalized_query", "n": {"$sum": 1}}},
+        {"$sort": {"n": -1, "_id": 1}},
+        {"$limit": limit},
+    ])]
+
+
+def suggestions(db: Database, q: str, limit: int = 8) -> dict:
     norm = normalize_query(q)
     if len(norm) < 2:
         return {"queries": [], "items": [], "categories": []}
-    like = f"%{norm}%"
-    queries = [
-        r[0]
-        for r in db.execute(
-            select(SearchEvent.normalized_query, func.count().label("n"))
-            .where(SearchEvent.normalized_query.like(f"{norm}%"), SearchEvent.results_count > 0)
-            .group_by(SearchEvent.normalized_query)
-            .order_by(text("n DESC"))
-            .limit(4)
-        )
-    ]
-    items = db.execute(
-        select(CatalogItem.id, CatalogItem.name, CatalogItem.brand, CatalogItem.icon, Category.slug)
-        .join(Category, CatalogItem.category_id == Category.id)
-        .where((CatalogItem.name.ilike(like)) | (CatalogItem.brand.ilike(f"{norm}%")))
-        .limit(limit)
-    ).all()
-    cats = db.execute(select(Category).where(Category.name.ilike(like))).scalars().all()
+    contains = {"$regex": re.escape(norm), "$options": "i"}
+    starts = {"$regex": f"^{re.escape(norm)}", "$options": "i"}
+    cats = categories(db)
+    queries, items = db.gather(
+        # Anchored, case-sensitive prefix on normalised (lower-case) text: served by the index.
+        lambda: _top_queries(db, {"normalized_query": {"$regex": f"^{re.escape(norm)}"},
+                                  "results_count": {"$gt": 0}}, 4),
+        lambda: db.catalog_items.find({"$or": [{"name": contains}, {"brand": starts}]}, limit=limit),
+    )
     return {
         "queries": queries,
-        "items": [{"id": i.id, "name": i.name, "brand": i.brand, "icon": i.icon, "category": i.slug} for i in items],
-        "categories": [{"slug": c.slug, "name": c.name, "icon": c.icon} for c in cats],
+        "items": [{"id": i.id, "name": i.name, "brand": i.brand, "icon": i.icon,
+                   "category": cats[i.category_id].slug if i.category_id in cats else None} for i in items],
+        "categories": [{"slug": c.slug, "name": c.name, "icon": c.icon} for c in cats.values()
+                       if norm in c.name.lower()],
     }
 
 
-def popular_searches(db: Session, limit: int = 8) -> list[str]:
-    rows = db.execute(
-        select(SearchEvent.normalized_query, func.count().label("n"))
-        .where(SearchEvent.results_count > 0)
-        .group_by(SearchEvent.normalized_query)
-        .order_by(text("n DESC"))
-        .limit(limit)
-    ).all()
-    return [r[0] for r in rows]
+def popular_searches(db: Database, limit: int = 8) -> list[str]:
+    return _top_queries(db, {"results_count": {"$gt": 0}}, limit)
 
 
-def recent_searches(db: Session, user_id: int, limit: int = 6) -> list[str]:
-    rows = db.execute(
-        select(SearchEvent.normalized_query, func.max(SearchEvent.created_at).label("t"))
-        .where(SearchEvent.user_id == user_id)
-        .group_by(SearchEvent.normalized_query)
-        .order_by(text("t DESC"))
-        .limit(limit)
-    ).all()
-    return [r[0] for r in rows]
+def recent_searches(db: Database, user_id: int, limit: int = 6) -> list[str]:
+    return [r["_id"] for r in db.search_history.aggregate([
+        {"$match": {"user_id": user_id}},
+        {"$group": {"_id": "$normalized_query", "t": {"$max": "$created_at"}}},
+        {"$sort": {"t": -1}},
+        {"$limit": limit},
+    ])]
 
 
 def reset_vocabulary() -> None:
-    global _vocab
-    _vocab = set()
-
+    _vocab.clear()

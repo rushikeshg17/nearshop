@@ -19,11 +19,10 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
-from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
 
-from app.core.database import utcnow
-from app.models import DemandForecast, ModelRun, Product, SalesRecord
+from app.core.database import Database, utcnow
+from app.models import DemandForecast, ModelRun, Product
+from app.services.loaders import with_catalog_items
 
 HISTORY_DAYS = 150
 HORIZON = 7
@@ -31,13 +30,15 @@ MIN_HISTORY_DAYS = 35
 FEATURES = ["lag7", "lag14", "lag28", "same_dow_avg", "dow", "month", "category_id", "price_ratio", "trend"]
 
 
-def _daily_matrix(db: Session) -> tuple[pd.DataFrame, bool]:
+def _daily_matrix(db: Database) -> tuple[pd.DataFrame, bool]:
     since = utcnow() - timedelta(days=HISTORY_DAYS)
-    rows = db.execute(
-        select(SalesRecord.product_id, SalesRecord.sold_at, SalesRecord.quantity, SalesRecord.is_demo).where(
-            SalesRecord.sold_at >= since
-        )
-    ).all()
+    # Summed per product and day inside MongoDB, so only the daily totals travel over the network.
+    rows = db.sales_history.aggregate([
+        {"$match": {"sold_at": {"$gte": since}}},
+        {"$group": {"_id": {"p": "$product_id", "d": {"$dateTrunc": {"date": "$sold_at", "unit": "day"}}},
+                    "quantity": {"$sum": "$quantity"}, "is_demo": {"$max": "$is_demo"}}},
+    ])
+    rows = [(r["_id"]["p"], r["_id"]["d"], r["quantity"], r["is_demo"]) for r in rows]
     if not rows:
         return pd.DataFrame(), False
     df = pd.DataFrame(rows, columns=["product_id", "sold_at", "quantity", "is_demo"])
@@ -60,17 +61,17 @@ def _features_at(series: np.ndarray, t: int, day: pd.Timestamp, category_id: int
     return [lag7, lag14, lag28, same_dow, day.dayofweek, day.month, category_id, price_ratio, trend]
 
 
-def train_and_forecast(db: Session) -> ModelRun:
+def train_and_forecast(db: Database) -> ModelRun:
     started = time.time()
     daily, uses_demo = _daily_matrix(db)
-    products = {p.id: p for p in db.scalars(select(Product).where(Product.is_active.is_(True)))}
+    products = {p.id: p for p in with_catalog_items(
+        db, db.products.find({"is_active": True}, projection={"description": 0, "specs": 0}))}
 
     run = ModelRun(name="demand", algorithm="RandomForestRegressor", uses_demo_data=uses_demo)
     if daily.empty:
         run.data_note = "No sales history yet. Forecasts appear once reservations and orders are completed."
         run.metrics = {}
-        db.add(run)
-        db.commit()
+        db.model_runs.insert(run)
         return run
 
     dates = list(daily.columns)
@@ -123,11 +124,10 @@ def train_and_forecast(db: Session) -> ModelRun:
         if uses_demo
         else "Trained on real completed pickups and deliveries."
     )
-    db.add(run)
-    db.flush()
+    run.id = db.next_id("model_runs")
 
     # Forecast the next 7 days for every listing with enough history.
-    db.execute(delete(DemandForecast))
+    forecasts = []
     t = n_days - 1
     for pid, row in daily.iterrows():
         p = products.get(pid)
@@ -142,7 +142,7 @@ def train_and_forecast(db: Session) -> ModelRun:
         trend = "rising" if last7 > prev7 * 1.25 + 1 else "falling" if last7 < prev7 * 0.75 - 1 else "steady"
         history_days = int(np.flatnonzero(series)[0]) if active_days else 0
         confidence = "high" if active_days >= 40 else "medium" if active_days >= 15 else "low"
-        db.add(
+        forecasts.append(
             DemandForecast(
                 product_id=pid,
                 shop_id=p.shop_id,
@@ -158,7 +158,13 @@ def train_and_forecast(db: Session) -> ModelRun:
             )
         )
     run.duration_ms = int((time.time() - started) * 1000)
-    db.commit()
+
+    def publish() -> None:  # readers see the old forecasts or the new ones, never a half-written set
+        db.demand_forecasts.delete_many({})
+        db.demand_forecasts.insert_many(forecasts)
+        db.model_runs.insert(run)
+
+    db.transaction(publish)
     return run
 
 

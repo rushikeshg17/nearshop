@@ -2,7 +2,9 @@
 
     uv run python -m database.seed.seed
 
-The city comes from NEARSHOP_SEED_CITY (default ballari; see cities.json for options).
+It writes to the MongoDB database in NEARSHOP_MONGODB_URI / NEARSHOP_MONGODB_DB and REPLACES what is
+there. Documents are built in memory and sent with bulk inserts, so a hosted cluster is seeded in
+about a minute. The city comes from NEARSHOP_SEED_CITY (default ballari; see cities.json for options).
 
 What it creates (all demo data; sales are flagged is_demo=True so AI outputs say so):
   - categories + ~300 catalog items, ~48 shops spread over real localities
@@ -27,18 +29,14 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 import numpy as np
-from alembic import command
-from alembic.config import Config
-from sqlalchemy import insert
 
 from app.ai.pipeline import train_all
 from app.core.config import BACKEND_DIR, settings
-from app.core.database import SessionLocal, engine, utcnow
+from app.core.database import Database, utcnow
 from app.core.security import hash_password
 from app.models import (
     CatalogItem,
     Category,
-    InventoryEvent,
     InventoryReason,
     Notification,
     Order,
@@ -51,7 +49,6 @@ from app.models import (
     SalesRecord,
     SearchEvent,
     Shop,
-    StatusEvent,
     User,
 )
 from app.models import (
@@ -60,8 +57,10 @@ from app.models import (
 from app.models import (
     ReservationStatus as RS,
 )
+from app.services.loaders import reset_category_cache
 from app.utils.geo import haversine_km
 from app.utils.text import short_code, slugify
+from database import schema
 
 DATA = BACKEND_DIR / "database" / "seed" / "data"
 SALES_DAYS = 150
@@ -106,15 +105,27 @@ def load(name: str):
     return json.loads((DATA / name).read_text())
 
 
-def reset_database() -> None:
-    engine.dispose()
-    db_path = settings.database_url.removeprefix("sqlite:///")
-    for suffix in ("", "-wal", "-shm"):
-        if os.path.exists(db_path + suffix):
-            os.remove(db_path + suffix)
-    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_DIR / "database" / "migrations"))
-    command.upgrade(cfg, "head")
+class Ids:
+    """Hands out integer ids locally while seeding; `save_counters` then tells the database where
+    each sequence ended so the running app continues from there."""
+
+    def __init__(self) -> None:
+        self.last: dict[str, int] = defaultdict(int)
+
+    def __call__(self, collection: str) -> int:
+        self.last[collection] += 1
+        return self.last[collection]
+
+    def save_counters(self, db: Database) -> None:
+        db.mongo["counters"].delete_many({})
+        db.mongo["counters"].insert_many([{"_id": name, "seq": seq} for name, seq in self.last.items()])
+
+
+def bulk_insert(collection, docs: list, chunk: int = 5000) -> None:
+    """Insert models or plain dicts in unordered batches."""
+    for i in range(0, len(docs), chunk):
+        batch = [d if isinstance(d, dict) else d.to_mongo() for d in docs[i:i + chunk]]
+        collection.raw.insert_many(batch, ordered=False)
 
 
 def round_price(p: float) -> float:
@@ -149,46 +160,45 @@ def main() -> None:
     shops_data = load("shops.json")
     baskets_data = load("baskets.json")
 
-    print(f"Resetting database and seeding {city['name']}...")
-    reset_database()
+    db = Database()
+    print(f"Resetting MongoDB database '{db.mongo.name}' and seeding {city['name']}...")
+    schema.reset(db.mongo)
+    reset_category_cache()
     now = utcnow()
-    db = SessionLocal()
+    nid = Ids()
     pw_hash = hash_password(demo_password)
     filler_hash = hash_password(os.urandom(16).hex())  # synthetic customers cannot log in
 
     # ------------------------------------------------------------ categories + catalog
     cats: dict[str, Category] = {}
     for i, c in enumerate(categories_data):
-        cats[c["slug"]] = Category(slug=c["slug"], name=c["name"], icon=c["icon"], description=c.get("description"),
-                                   color_hue=c.get("color_hue", 250), sort_order=i)
-    db.add_all(cats.values())
-    db.flush()
+        cats[c["slug"]] = Category(id=nid("categories"), slug=c["slug"], name=c["name"], icon=c["icon"],
+                                   description=c.get("description"), color_hue=c.get("color_hue", 250), sort_order=i)
+    cat_by_id = {c.id: c for c in cats.values()}
     catalog: dict[str, CatalogItem] = {}
     meta: dict[int, dict] = {}
     for item in catalog_data:
-        ci = CatalogItem(slug=item["slug"], name=item["name"], brand=item.get("brand"),
-                         category_id=cats[item["category"]].id, subcategory=item.get("subcategory"),
-                         unit=item.get("unit"), mrp=item.get("mrp"), typical_price=item["typical_price"],
-                         description=item.get("description"), specs=item.get("specs") or {},
-                         tags=item.get("tags") or [], icon=item.get("icon") or cats[item["category"]].icon)
-        db.add(ci)
-        catalog[item["slug"]] = ci
-    db.flush()
+        catalog[item["slug"]] = CatalogItem(
+            id=nid("catalog_items"), slug=item["slug"], name=item["name"], brand=item.get("brand"),
+            category_id=cats[item["category"]].id, subcategory=item.get("subcategory"),
+            unit=item.get("unit"), mrp=item.get("mrp"), typical_price=item["typical_price"],
+            description=item.get("description"), specs=item.get("specs") or {},
+            tags=item.get("tags") or [], icon=item.get("icon") or cats[item["category"]].icon)
     for item in catalog_data:
         ci = catalog[item["slug"]]
         meta[ci.id] = {"demand": float(item.get("base_daily_demand", 0.5)),
                        "season": item.get("seasonality") or [1.0] * 12, "category": item["category"]}
     by_category: dict[str, list[CatalogItem]] = defaultdict(list)
     for ci in catalog.values():
-        by_category[next(k for k, v in cats.items() if v.id == ci.category_id)].append(ci)
+        by_category[cat_by_id[ci.category_id].slug].append(ci)
 
     # ------------------------------------------------------------ users
-    admin = User(name="NearShop Admin", email="admin@nearshop.demo", password_hash=pw_hash, role=Role.ADMIN)
+    admin = User(id=nid("users"), name="NearShop Admin", email="admin@nearshop.demo", password_hash=pw_hash, role=Role.ADMIN)
     center = city["center"]
-    priya = User(name="Priya Sharma", email="priya@nearshop.demo", phone="9876501234", password_hash=pw_hash,
+    priya = User(id=nid("users"), name="Priya Sharma", email="priya@nearshop.demo", phone="9876501234", password_hash=pw_hash,
                  role=Role.CUSTOMER, home_lat=center["lat"] + 0.004, home_lng=center["lng"] - 0.006,
                  home_label=city["localities"][0]["name"])
-    db.add_all([admin, priya])
+    users: list[User] = [admin, priya]
     customers = [priya]
     used_emails = {"admin@nearshop.demo", "priya@nearshop.demo"}
     for _ in range(140):
@@ -197,11 +207,10 @@ def main() -> None:
         if email in used_emails:
             continue
         used_emails.add(email)
-        customers.append(User(name=name, email=email, phone=f"9{rng.randint(100000000, 999999999)}",
+        customers.append(User(id=nid("users"), name=name, email=email, phone=f"9{rng.randint(100000000, 999999999)}",
                               password_hash=filler_hash, role=Role.CUSTOMER,
                               created_at=now - timedelta(days=rng.randint(20, 200))))
-    db.add_all(customers[1:])
-    db.flush()
+    users += customers[1:]
 
     # ------------------------------------------------------------ shops
     localities = city["localities"]
@@ -216,15 +225,14 @@ def main() -> None:
         lat = loc["lat"] + rng.uniform(-jitter, jitter)
         lng = loc["lng"] + rng.uniform(-jitter, jitter)
         is_featured = i == featured_idx
-        owner = User(name=tpl["owner_name"], password_hash=pw_hash if is_featured else filler_hash,
+        owner = User(id=nid("users"), name=tpl["owner_name"], password_hash=pw_hash if is_featured else filler_hash,
                      email="owner@nearshop.demo" if is_featured else f"{slugify(tpl['name'])}@shops.nearshop.demo",
                      phone=f"9{rng.randint(100000000, 999999999)}", role=Role.OWNER,
                      created_at=now - timedelta(days=rng.randint(150, 400)))
-        db.add(owner)
-        db.flush()
+        users.append(owner)
         slug = slugify(f"{tpl['name']} {loc['name']}")
         shop = Shop(
-            owner_id=owner.id, name=tpl["name"], slug=slug, tagline=tpl.get("tagline"),
+            id=nid("shops"), owner=owner, owner_id=owner.id, name=tpl["name"], slug=slug, tagline=tpl.get("tagline"),
             description=tpl.get("description"), phone=owner.phone,
             address_line=f"{rng.randint(1, 480)}, {rng.choice(['Main Road', 'Cross Road', '1st Main', '2nd Cross', 'Market Road', 'Temple Street'])}, {loc['name']}",
             locality=loc["name"], city=city["name"], pincode=loc.get("pincode"), lat=lat, lng=lng,
@@ -237,11 +245,10 @@ def main() -> None:
             hold_minutes=rng.choice([30, 30, 45, 60]) if not is_featured else 30,
             is_verified=is_featured or rng.random() < 0.7,
             categories=[cats[c] for c in tpl["categories"]],
-            created_at=owner.created_at,
+            category_ids=[cats[c].id for c in tpl["categories"]],
+            created_at=owner.created_at, updated_at=owner.created_at,
         )
-        db.add(shop)
         shops.append(shop)
-    db.flush()
     for s in shops:
         s_featured = s.owner.email == "owner@nearshop.demo"
         shop_profile[s.id] = {
@@ -281,15 +288,13 @@ def main() -> None:
                     qty = max(3, int(daily * rng.uniform(8, 35)) + rng.randint(0, 6))
                 keywords = " ".join(dict.fromkeys([*(ci.tags or []), cats[cs].name.lower(),
                                                    (ci.subcategory or "").replace("-", " ")]))
-                p = Product(shop_id=s.id, catalog_item_id=ci.id, category_id=ci.category_id, name=ci.name,
+                p = Product(id=nid("products"), shop_id=s.id, catalog_item_id=ci.id, category_id=ci.category_id, name=ci.name,
                             brand=ci.brand, unit=ci.unit, description=ci.description, specs=ci.specs,
                             keywords=keywords, icon=ci.icon, price=price, mrp=ci.mrp, quantity=qty,
                             low_stock_threshold=max(2, min(10, int(daily * 3) + 1)),
                             sku=f"{slugify(ci.brand or 'gen')[:4].upper()}-{ci.id:04d}",
                             created_at=now - timedelta(days=SALES_DAYS + rng.randint(0, 60)))
                 products.append(p)
-    db.add_all(products)
-    db.flush()
     print(f"  {len(shops)} shops, {len(products)} listings")
 
     # ------------------------------------------------------------ freshness + inventory events
@@ -302,7 +307,8 @@ def main() -> None:
     for p in products:
         s = shop_by_id[p.shop_id]
         act = shop_profile[s.id]["activity"]
-        inv_rows.append(dict(product_id=p.id, shop_id=s.id, delta=p.quantity, quantity_after=p.quantity,
+        inv_rows.append(dict(_id=nid("inventory_events"), product_id=p.id, shop_id=s.id, delta=p.quantity,
+                             quantity_after=p.quantity,
                              reason=InventoryReason.INITIAL.value, actor_id=s.owner_id, created_at=p.created_at))
         qty_after = p.quantity
         for d in range(0, 7):
@@ -310,12 +316,12 @@ def main() -> None:
                 when = now - timedelta(days=d, minutes=rng.randint(0, 600))
                 when = max(min(when, s.inventory_updated_at), now - timedelta(days=7))
                 delta = rng.randint(2, 12)
-                inv_rows.append(dict(product_id=p.id, shop_id=s.id, delta=delta, quantity_after=qty_after,
+                inv_rows.append(dict(_id=nid("inventory_events"), product_id=p.id, shop_id=s.id, delta=delta,
+                                     quantity_after=qty_after,
                                      reason=InventoryReason.RESTOCK.value, actor_id=s.owner_id, created_at=when))
                 qty_after = max(0, qty_after - delta)
         p.stock_updated_at = s.inventory_updated_at - timedelta(minutes=rng.uniform(0, 240) * (1.2 - act))
-    db.execute(insert(InventoryEvent), inv_rows)
-    db.commit()
+        p.updated_at = p.stock_updated_at
 
     # ------------------------------------------------------------ demo sales (daily demand + baskets)
     print("  generating sales history...")
@@ -334,7 +340,8 @@ def main() -> None:
                 sold_at = day + timedelta(hours=rng.randint(4, 15), minutes=rng.randint(0, 59))  # 9:30am-9pm IST
                 if sold_at > now:
                     continue
-                sales_rows.append(dict(shop_id=p.shop_id, product_id=p.id, catalog_item_id=p.catalog_item_id,
+                sales_rows.append(dict(_id=nid("sales_history"), shop_id=p.shop_id, product_id=p.id,
+                                       catalog_item_id=p.catalog_item_id, category_id=p.category_id,
                                        customer_id=None, basket_id=f"demo-{len(sales_rows)}", quantity=k,
                                        unit_price=p.price, source=SaleSource.DEMO.value, is_demo=True,
                                        sold_at=sold_at))
@@ -367,37 +374,47 @@ def main() -> None:
                 n_baskets += 1
                 for cid in picked:
                     p = items[cid]
-                    sales_rows.append(dict(shop_id=s.id, product_id=p.id, catalog_item_id=cid, customer_id=None,
+                    sales_rows.append(dict(_id=nid("sales_history"), shop_id=s.id, product_id=p.id,
+                                           catalog_item_id=cid, category_id=p.category_id, customer_id=None,
                                            basket_id=bid, quantity=1, unit_price=p.price,
                                            source=SaleSource.DEMO.value, is_demo=True, sold_at=sold_at))
-    for i in range(0, len(sales_rows), 20000):
-        db.execute(insert(SalesRecord), sales_rows[i : i + 20000])
-    db.commit()
-    print(f"  {len(sales_rows)} sales rows, {n_baskets} multi-item baskets")
+    print(f"  {len(sales_rows)} demo sales, {n_baskets} multi-item baskets")
 
     # ------------------------------------------------------------ reservation / order history
     print("  generating reservations, orders and reviews...")
-    events, reviews_n = [], 0
+    events: list[dict] = []
+    reservations: list[Reservation] = []
+    orders: list[Order] = []
+    reviews: list[Review] = []
+    notifications: list[Notification] = []
+
+    def sale(shop, p, customer, basket_id, quantity, source, at) -> None:
+        sales_rows.append(SalesRecord(id=nid("sales_history"), shop_id=shop.id, product_id=p.id,
+                                      catalog_item_id=p.catalog_item_id, category_id=p.category_id,
+                                      customer_id=customer.id, basket_id=basket_id, quantity=quantity,
+                                      unit_price=p.price, source=source, is_demo=True, sold_at=at).to_mongo())
+
     in_stock_by_shop: dict[int, list[Product]] = defaultdict(list)
     for p in products:
         if p.quantity > 0:
             in_stock_by_shop[p.shop_id].append(p)
 
     def ev(entity, eid, shop_id, frm, to, role, actor, at, note=None):
-        events.append(dict(entity=entity, entity_id=eid, shop_id=shop_id, from_status=frm, to_status=to,
+        events.append(dict(_id=nid("status_events"), entity=entity, entity_id=eid, shop_id=shop_id, from_status=frm, to_status=to,
                            actor_role=role, actor_id=actor, note=note, created_at=at))
 
     def add_review(customer, shop, product_id, at, reservation_id=None, order_id=None):
-        nonlocal reviews_n
         q = shop_profile[shop.id]["quality"]
         rating = int(min(5, max(1, round(rng.gauss(q, 0.7)))))
-        db.add(Review(customer_id=customer.id, shop_id=shop.id, product_id=product_id,
-                      reservation_id=reservation_id, order_id=order_id, rating=rating,
-                      accuracy_rating=int(min(5, max(1, round(rng.gauss(q + 0.1, 0.6))))),
-                      delivery_rating=int(min(5, max(1, round(rng.gauss(q, 0.7))))) if order_id else None,
-                      comment=rng.choice(REVIEW_COMMENTS[rating]) if rng.random() < 0.75 else None,
-                      created_at=at + timedelta(hours=rng.randint(1, 30))))
-        reviews_n += 1
+        reviews.append(Review(id=nid("reviews"), customer_id=customer.id, shop_id=shop.id, product_id=product_id,
+                              reservation_id=reservation_id, order_id=order_id, rating=rating,
+                              accuracy_rating=int(min(5, max(1, round(rng.gauss(q + 0.1, 0.6))))),
+                              delivery_rating=int(min(5, max(1, round(rng.gauss(q, 0.7))))) if order_id else None,
+                              comment=rng.choice(REVIEW_COMMENTS[rating]) if rng.random() < 0.75 else None,
+                              created_at=at + timedelta(hours=rng.randint(1, 30))))
+        # Computed pattern: the shop carries its own rating totals.
+        shop.rating_sum += rating
+        shop.rating_count += 1
 
     for s in shops:
         prof = shop_profile[s.id]
@@ -410,12 +427,12 @@ def main() -> None:
             p = rng.choice(stock)
             created = now - timedelta(days=rng.uniform(0.5, HISTORY_DAYS), minutes=rng.randint(0, 600))
             qty = 1 if rng.random() < 0.85 else 2
-            r = Reservation(code=short_code("R"), customer_id=cust.id, shop_id=s.id, product_id=p.id, quantity=qty,
+            r = Reservation(id=nid("reservations"), code=short_code("R"), customer_id=cust.id, shop_id=s.id,
+                            product_id=p.id, quantity=qty,
                             unit_price=p.price, status=RS.REQUESTED, hold_minutes=s.hold_minutes,
                             expires_at=created + timedelta(minutes=settings.request_response_minutes),
                             created_at=created, updated_at=created)
-            db.add(r)
-            db.flush()
+            reservations.append(r)
             ev("reservation", r.id, s.id, None, "REQUESTED", "customer", cust.id, created)
             roll = rng.random()
             if roll > prof["responsiveness"]:
@@ -447,9 +464,7 @@ def main() -> None:
                 r.ready_at, r.completed_at, r.status = ready, done, RS.COMPLETED
                 ev("reservation", r.id, s.id, "CONFIRMED", "READY_FOR_PICKUP", "owner", s.owner_id, ready)
                 ev("reservation", r.id, s.id, "READY_FOR_PICKUP", "COMPLETED", "owner", s.owner_id, done)
-                db.add(SalesRecord(shop_id=s.id, product_id=p.id, catalog_item_id=p.catalog_item_id,
-                                   customer_id=cust.id, basket_id=r.code, quantity=qty, unit_price=p.price,
-                                   source=SaleSource.RESERVATION, is_demo=True, sold_at=done))
+                sale(s, p, cust, r.code, qty, SaleSource.RESERVATION, done)
                 if rng.random() < 0.5:
                     add_review(cust, s, p.id, done, reservation_id=r.id)
             r.updated_at = r.closed_at or r.completed_at or r.confirmed_at
@@ -464,15 +479,14 @@ def main() -> None:
                 dlng = s.lng + (dist / (111 * math.cos(math.radians(s.lat)))) * math.sin(ang)
                 subtotal = round(sum(p.price for p in picks), 2)
                 fee = 0.0 if s.free_delivery_above and subtotal >= s.free_delivery_above else s.delivery_fee
-                o = Order(code=short_code("D"), customer_id=cust.id, shop_id=s.id, status=OS.PENDING,
+                o = Order(id=nid("orders"), code=short_code("D"), customer_id=cust.id, shop_id=s.id, status=OS.PENDING,
                           delivery_address=f"{rng.randint(1, 900)}, {rng.choice(localities)['name']}, {city['name']}",
                           delivery_lat=dlat, delivery_lng=dlng, contact_phone=cust.phone or "9876500000",
                           distance_km=round(haversine_km(s.lat, s.lng, dlat, dlng), 2), subtotal=subtotal,
                           delivery_fee=fee, total=subtotal + fee, created_at=created, updated_at=created,
                           items=[OrderItem(product_id=p.id, name=p.name, unit_price=p.price, quantity=1)
                                  for p in picks])
-                db.add(o)
-                db.flush()
+                orders.append(o)
                 ev("order", o.id, s.id, None, "PENDING", "customer", cust.id, created)
                 t = created + timedelta(minutes=rng.randint(3, 20))
                 if rng.random() < 0.06:
@@ -496,9 +510,7 @@ def main() -> None:
                     o.status, o.delivered_at, o.payment_status = OS.DELIVERED, t, "paid"
                     ev("order", o.id, s.id, "OUT_FOR_DELIVERY", "DELIVERED", "owner", s.owner_id, t)
                     for p in picks:
-                        db.add(SalesRecord(shop_id=s.id, product_id=p.id, catalog_item_id=p.catalog_item_id,
-                                           customer_id=cust.id, basket_id=o.code, quantity=1, unit_price=p.price,
-                                           source=SaleSource.ORDER, is_demo=True, sold_at=t))
+                        sale(s, p, cust, o.code, 1, SaleSource.ORDER, t)
                     if rng.random() < 0.45:
                         add_review(cust, s, picks[0].id, t, order_id=o.id)
                 o.updated_at = o.closed_at or o.delivered_at
@@ -514,19 +526,16 @@ def main() -> None:
         created = now - timedelta(days=3 + i * 6, hours=rng.randint(1, 8))
         conf = created + timedelta(minutes=5)
         done = conf + timedelta(minutes=18)
-        r = Reservation(code=short_code("R"), customer_id=priya.id, shop_id=s.id, product_id=p.id, quantity=1,
+        r = Reservation(id=nid("reservations"), code=short_code("R"), customer_id=priya.id, shop_id=s.id, product_id=p.id, quantity=1,
                         unit_price=p.price, status=RS.COMPLETED, hold_minutes=s.hold_minutes,
                         expires_at=conf + timedelta(minutes=s.hold_minutes), confirmed_at=conf,
                         ready_at=conf + timedelta(minutes=6), completed_at=done, created_at=created, updated_at=done)
-        db.add(r)
-        db.flush()
+        reservations.append(r)
         for frm, to, at, role in [(None, "REQUESTED", created, "customer"), ("REQUESTED", "CONFIRMED", conf, "owner"),
                                   ("CONFIRMED", "READY_FOR_PICKUP", r.ready_at, "owner"),
                                   ("READY_FOR_PICKUP", "COMPLETED", done, "owner")]:
             ev("reservation", r.id, s.id, frm, to, role, priya.id if role == "customer" else s.owner_id, at)
-        db.add(SalesRecord(shop_id=s.id, product_id=p.id, catalog_item_id=p.catalog_item_id, customer_id=priya.id,
-                           basket_id=r.code, quantity=1, unit_price=p.price, source=SaleSource.RESERVATION,
-                           is_demo=True, sold_at=done))
+        sale(s, p, priya, r.code, 1, SaleSource.RESERVATION, done)
         if i > 0:  # leave the most recent one unreviewed so the "rate your pickup" prompt shows
             add_review(priya, s, p.id, done, reservation_id=r.id)
 
@@ -534,20 +543,20 @@ def main() -> None:
     fstock = sorted(in_stock_by_shop[featured.id], key=lambda p: -p.quantity)
     for cust, p, mins in [(customers[5], fstock[0], 3), (customers[9], fstock[3], 7)]:
         created = now - timedelta(minutes=mins)
-        r = Reservation(code=short_code("R"), customer_id=cust.id, shop_id=featured.id, product_id=p.id, quantity=1,
+        r = Reservation(id=nid("reservations"), code=short_code("R"), customer_id=cust.id, shop_id=featured.id, product_id=p.id, quantity=1,
                         unit_price=p.price, status=RS.REQUESTED, hold_minutes=featured.hold_minutes,
                         expires_at=created + timedelta(minutes=settings.request_response_minutes),
                         created_at=created, updated_at=created)
-        db.add(r)
-        db.flush()
+        reservations.append(r)
         ev("reservation", r.id, featured.id, None, "REQUESTED", "customer", cust.id, created)
-        db.add(Notification(user_id=featured.owner_id, kind="reservation_new", title=f"New reservation {r.code}",
-                            body=f"{cust.name} wants 1 x {p.name}.", link="/shop/reservations", created_at=created))
-    db.add(Notification(user_id=priya.id, kind="welcome", title="Welcome to NearShop",
-                        body="Search for anything and see which shops near you have it in stock right now.",
-                        link="/search", created_at=now - timedelta(days=30)))
-    db.execute(insert(StatusEvent), events)
-    db.commit()
+        notifications.append(Notification(
+            id=nid("notifications"), user_id=featured.owner_id, kind="reservation_new",
+            title=f"New reservation {r.code}", body=f"{cust.name} wants 1 x {p.name}.",
+            link="/shop/reservations", created_at=created))
+    notifications.append(Notification(
+        id=nid("notifications"), user_id=priya.id, kind="welcome", title="Welcome to NearShop",
+        body="Search for anything and see which shops near you have it in stock right now.",
+        link="/search", created_at=now - timedelta(days=30)))
 
     # ------------------------------------------------------------ search history
     queries: list[str] = []
@@ -565,22 +574,33 @@ def main() -> None:
         else:
             q, n = rng.choice(queries).strip().lower(), rng.randint(3, 40)
         cust = rng.choice(customers) if rng.random() < 0.6 else None
-        search_rows.append(dict(user_id=cust.id if cust else None, query=q, normalized_query=q, category_slug=None,
-                                results_count=n, lat=round(loc["lat"] + rng.uniform(-0.01, 0.01), 3),
-                                lng=round(loc["lng"] + rng.uniform(-0.01, 0.01), 3),
-                                created_at=now - timedelta(days=rng.uniform(0, 30))))
+        search_rows.append(SearchEvent(
+            id=nid("search_history"), user_id=cust.id if cust else None, query=q, normalized_query=q,
+            results_count=n, lat=round(loc["lat"] + rng.uniform(-0.01, 0.01), 3),
+            lng=round(loc["lng"] + rng.uniform(-0.01, 0.01), 3), created_at=now - timedelta(days=rng.uniform(0, 30))))
     for q in ["phone charger", "usb c cable", "umbrella", "led bulb 9w", "engine oil"]:
-        search_rows.append(dict(user_id=priya.id, query=q, normalized_query=q, category_slug=None, results_count=12,
-                                lat=round(priya.home_lat, 3), lng=round(priya.home_lng, 3),
-                                created_at=now - timedelta(days=rng.uniform(0, 6))))
-    db.execute(insert(SearchEvent), search_rows)
-    db.commit()
-    print(f"  {len(events)} status events, {reviews_n} reviews, {len(search_rows)} searches")
+        search_rows.append(SearchEvent(
+            id=nid("search_history"), user_id=priya.id, query=q, normalized_query=q, results_count=12,
+            lat=round(priya.home_lat, 3), lng=round(priya.home_lng, 3),
+            created_at=now - timedelta(days=rng.uniform(0, 6))))
+    print(f"  {len(reservations)} reservations, {len(orders)} orders, {len(events)} status events, "
+          f"{len(reviews)} reviews, {len(search_rows)} searches")
+
+    # ------------------------------------------------------------ write everything to MongoDB
+    print("  writing to MongoDB...")
+    for collection, docs in [
+        (db.categories, list(cats.values())), (db.catalog_items, list(catalog.values())), (db.users, users),
+        (db.shops, shops), (db.products, products), (db.inventory_events, inv_rows),
+        (db.reservations, reservations), (db.orders, orders), (db.status_events, events), (db.reviews, reviews),
+        (db.notifications, notifications), (db.search_history, search_rows), (db.sales_history, sales_rows),
+    ]:
+        bulk_insert(collection, docs)
+        print(f"    {collection.name}: {len(docs)}")
+    nid.save_counters(db)
 
     # ------------------------------------------------------------ train AI
     print("  training AI models (first run downloads the embedding model)...")
     results = train_all(db)
-    db.close()
     print(json.dumps({k: v for k, v in results.items() if k != "demand"}, indent=1, default=str)[:1500])
     print(f"  demand: {results.get('demand')}")
     print(f"Done in {time.time() - started:.0f}s. Demo password: set by NEARSHOP_DEMO_PASSWORD (see .env.example)")

@@ -1,15 +1,15 @@
-"""FastAPI dependencies: DB session, current user, role guards, CSRF check."""
+"""FastAPI dependencies: database handle, current user, role guards, CSRF check."""
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import Database, get_db
 from app.core.security import decode_access_token
 from app.models import Role, Shop, User
+from app.services.loaders import with_categories
 
-DB = Annotated[Session, Depends(get_db)]
+DB = Annotated[Database, Depends(get_db)]
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_HEADER = "x-nearshop-client"
@@ -33,7 +33,7 @@ def get_optional_user(request: Request, db: DB) -> User | None:
     payload = decode_access_token(token)
     if not payload:
         return None
-    user = db.get(User, int(payload["sub"]))
+    user = db.users.get(int(payload["sub"]))
     if not user or not user.is_active:
         return None
     return user
@@ -67,10 +67,10 @@ AdminUser = Annotated[User, Depends(require_role(Role.ADMIN))]
 
 def get_owner_shop(user: OwnerUser, db: DB) -> Shop:
     """The signed-in owner's shop. V1: one shop per owner account."""
-    shop = db.query(Shop).filter(Shop.owner_id == user.id).order_by(Shop.id).first()
+    shop = db.shops.find_one({"owner_id": user.id}, sort=[("_id", 1)])
     if shop is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "You have not set up a shop yet")
-    return shop
+    return with_categories(db, [shop])[0]
 
 
 OwnerShop = Annotated[Shop, Depends(get_owner_shop)]

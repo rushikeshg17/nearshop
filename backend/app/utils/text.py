@@ -85,12 +85,10 @@ def expand_synonyms(q: str) -> list[str]:
     return extra
 
 
-def fts_escape_terms(words: list[str]) -> list[str]:
-    """Turn words into safe FTS5 tokens (quoted, with prefix match for the last typed word)."""
-    out = []
+def search_tokens(words: list[str]) -> list[str]:
+    """Words safe to put in a MongoDB $text search: letters and digits only, so user input can
+    never be read as a phrase ("...") or a negation (-word)."""
+    out: list[str] = []
     for w in words:
-        w = re.sub(r"[^\w]", " ", w).strip()
-        for part in w.split():
-            if len(part) >= 2:
-                out.append(f'"{part}"')
-    return out
+        out.extend(part for part in re.sub(r"[^\w]", " ", w).split() if len(part) >= 2)
+    return list(dict.fromkeys(out))

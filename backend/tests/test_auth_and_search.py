@@ -29,13 +29,21 @@ def test_me_is_null_when_signed_out(client):
     assert client.get("/api/auth/me").json() is None
 
 
-def test_password_is_hashed(ids):
-    from app.core.database import SessionLocal
-    from app.models import User
+def test_password_is_hashed(db):
+    assert db.users.find_one({"email": "cust@example.com"}).password_hash.startswith("$argon2")
 
-    with SessionLocal() as db:
-        u = db.query(User).filter_by(email="cust@example.com").one()
-        assert u.password_hash.startswith("$argon2")
+
+def test_database_rejects_invalid_documents(db, ids):
+    """The schema validators are the last line of defence if application code has a bug."""
+    import pytest
+    from pymongo.errors import DuplicateKeyError, WriteError
+
+    with pytest.raises(WriteError):  # stock can never go negative
+        db.products.raw.update_one({"_id": ids["tape"]}, {"$set": {"quantity": -1}})
+    with pytest.raises(WriteError):  # unknown status
+        db.reservations.raw.insert_one({"_id": 999_999, "status": "MAYBE"})
+    with pytest.raises(DuplicateKeyError):  # one account per email
+        db.users.raw.insert_one({**db.users.raw.find_one({"email": "cust@example.com"}), "_id": 999_999})
 
 
 def test_search_finds_by_keyword_and_filters_by_distance(client, ids):

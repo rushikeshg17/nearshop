@@ -7,12 +7,10 @@
 Stock is held at SHOP_CONFIRMED and released on cancel or return. Payment is cash on
 delivery in V1; payment_method/payment_status keep the model open for UPI/cards later.
 """
+import logging
 from datetime import timedelta
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from app.core.database import utcnow
+from app.core.database import Database, transactional, utcnow
 from app.core.errors import Conflict, Forbidden, InvalidTransition, NotFound
 from app.models import (
     InventoryReason,
@@ -27,11 +25,13 @@ from app.models import (
 from app.models import (
     OrderStatus as OS,
 )
-from app.services.fulfillment_common import record_event, record_sale
+from app.services.fulfillment_common import record_event, record_sales
 from app.services.inventory import change_stock
 from app.services.notifications import notify
 from app.utils.geo import haversine_km
 from app.utils.text import short_code
+
+log = logging.getLogger(__name__)
 
 ACTIVE = {OS.PENDING, OS.SHOP_CONFIRMED, OS.PREPARING, OS.OUT_FOR_DELIVERY}
 PENDING_TIMEOUT_MINUTES = 60
@@ -82,8 +82,9 @@ def quote_delivery(shop: Shop, lat: float, lng: float, subtotal: float) -> dict:
     }
 
 
+@transactional
 def create_order(
-    db: Session,
+    db: Database,
     customer: User,
     items: list[tuple[int, int]],
     address: str,
@@ -94,9 +95,10 @@ def create_order(
 ) -> Order:
     if not items:
         raise Conflict("Add at least one item")
+    found = db.products.by_ids(pid for pid, _ in items)
     products: list[tuple[Product, int]] = []
     for product_id, qty in items:
-        p = db.get(Product, product_id)
+        p = found.get(product_id)
         if p is None or not p.is_active:
             raise NotFound("One of the items is no longer listed")
         if qty < 1 or qty > 50:
@@ -107,7 +109,7 @@ def create_order(
     shop_ids = {p.shop_id for p, _ in products}
     if len(shop_ids) != 1:
         raise Conflict("A delivery order can contain items from one shop only")
-    shop = products[0][0].shop
+    shop = db.shops.get(products[0][0].shop_id)
     if not shop.is_active:
         raise Conflict("This shop is not taking orders right now")
 
@@ -116,7 +118,7 @@ def create_order(
     if not quote["eligible"]:
         raise Conflict(quote["reason"], code="delivery_unavailable")
 
-    order = Order(
+    order = db.orders.insert(Order(
         code=short_code("D"),
         customer_id=customer.id,
         shop_id=shop.id,
@@ -131,33 +133,38 @@ def create_order(
         total=round(subtotal + quote["delivery_fee"], 2),
         note=(note or "").strip() or None,
         items=[OrderItem(product_id=p.id, name=p.name, unit_price=p.price, quantity=q) for p, q in products],
-    )
-    db.add(order)
-    db.flush()
+    ))
     record_event(db, entity="order", entity_id=order.id, shop_id=shop.id, from_status=None,
                  to_status=OS.PENDING, actor_role="customer", actor_id=customer.id)
     summary = ", ".join(f"{q} x {p.name}" for p, q in products)
     notify(db, shop.owner_id, "order_new", f"New delivery order {order.code}",
            f"{summary} to {address[:60]} ({quote['distance_km']} km). COD Rs {order.total:.0f}.", "/shop/orders")
-    db.commit()
-    db.refresh(order)
     return order
 
 
-def _actor_for(user: User | None, order: Order, db: Session) -> str:
+def _actor_for(user: User | None, order: Order, shop_owner_id: int) -> str:
     if user is None:
         return "system"
     if user.role == Role.CUSTOMER and order.customer_id == user.id:
         return "customer"
-    if user.role == Role.OWNER and db.get(Shop, order.shop_id).owner_id == user.id:
+    if user.role == Role.OWNER and shop_owner_id == user.id:
         return "owner"
     if user.role == Role.ADMIN:
         return "admin"
     raise Forbidden("This order belongs to someone else")
 
 
-def transition(db: Session, order: Order, action: str, user: User | None, reason: str | None = None) -> Order:
-    actor = _actor_for(user, order, db)
+def transition(db: Database, order_id: int, action: str, user: User | None, reason: str | None = None) -> Order:
+    """Move an order through its state machine as one all-or-nothing transaction."""
+    return db.transaction(lambda: _transition(db, order_id, action, user, reason))
+
+
+def _transition(db: Database, order_id: int, action: str, user: User | None, reason: str | None) -> Order:
+    order = db.orders.get(order_id)  # loaded inside the transaction, see reservations._transition
+    if order is None:
+        raise NotFound("Order not found")
+    shop = db.shops.get(order.shop_id)
+    actor = _actor_for(user, order, shop.owner_id)
     key = (order.status, action)
     if key not in TRANSITIONS:
         raise InvalidTransition(f"Cannot {action} an order that is {order.status.replace('_', ' ').lower()}")
@@ -167,36 +174,29 @@ def transition(db: Session, order: Order, action: str, user: User | None, reason
 
     now = utcnow()
     from_status = order.status
-    shop = db.get(Shop, order.shop_id)
     actor_id = user.id if user else None
+    changes: dict = {"status": to_status}
+    products = db.products.by_ids(i.product_id for i in order.items) \
+        if action in {"confirm", "deliver", "cancel", "return"} else {}
 
     if action == "confirm":
-        # All-or-nothing: if any item is short, change_stock raises and the whole transaction rolls back.
-        try:
-            for item in order.items:
-                change_stock(db, item.product, -item.quantity, InventoryReason.ORDER_HOLD, actor_id)
-        except Exception:
-            db.rollback()
-            raise
-        order.stock_held = True
-    elif action == "deliver":
-        order.delivered_at = now
-        order.payment_status = "paid"  # COD collected at the door
-        order.stock_held = False
+        # All-or-nothing: if any item is short, change_stock raises and the whole transaction aborts.
         for item in order.items:
-            record_sale(db, product=item.product, quantity=item.quantity, unit_price=item.unit_price,
-                        source=SaleSource.ORDER, basket_id=order.code, customer_id=order.customer_id)
+            change_stock(db, products[item.product_id], -item.quantity, InventoryReason.ORDER_HOLD, actor_id)
+        changes["stock_held"] = True
+    elif action == "deliver":
+        changes.update(delivered_at=now, payment_status="paid", stock_held=False)  # COD collected at the door
+        record_sales(db, [(products[i.product_id], i.quantity, i.unit_price) for i in order.items],
+                     source=SaleSource.ORDER, basket_id=order.code, customer_id=order.customer_id)
     elif action in {"cancel", "return"}:
         if order.stock_held:
             for item in order.items:
-                change_stock(db, item.product, item.quantity, InventoryReason.ORDER_RELEASE, actor_id)
-            order.stock_held = False
-        order.closed_at = now
-        order.close_reason = (reason or "").strip() or None
+                change_stock(db, products[item.product_id], item.quantity, InventoryReason.ORDER_RELEASE, actor_id)
+        changes.update(stock_held=False, closed_at=now, close_reason=(reason or "").strip() or None)
     elif action == "fail":
-        order.close_reason = (reason or "").strip() or None
+        changes["close_reason"] = (reason or "").strip() or None
 
-    order.status = to_status
+    db.orders.set(order, **changes)
 
     if actor != "customer" and to_status in CUSTOMER_MESSAGES:
         title, body = CUSTOMER_MESSAGES[to_status]
@@ -209,17 +209,15 @@ def transition(db: Session, order: Order, action: str, user: User | None, reason
 
     record_event(db, entity="order", entity_id=order.id, shop_id=order.shop_id, from_status=from_status,
                  to_status=to_status, actor_role=actor, actor_id=actor_id, note=reason)
-    db.commit()
-    db.refresh(order)
     return order
 
 
-def cancel_stale_pending(db: Session) -> int:
+def cancel_stale_pending(db: Database) -> int:
     cutoff = utcnow() - timedelta(minutes=PENDING_TIMEOUT_MINUTES)
-    stale = db.scalars(select(Order).where(Order.status == OS.PENDING, Order.created_at <= cutoff)).all()
-    for order in stale:
+    stale = db.orders.find_raw({"status": OS.PENDING, "created_at": {"$lte": cutoff}}, {"_id": 1})
+    for doc in stale:
         try:
-            transition(db, order, "cancel", None, "The shop did not respond within an hour")
-        except Exception:
-            db.rollback()
+            transition(db, doc["_id"], "cancel", None, "The shop did not respond within an hour")
+        except Exception as exc:
+            log.warning("could not auto-cancel order %s: %s", doc["_id"], exc)
     return len(stale)

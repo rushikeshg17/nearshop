@@ -2,16 +2,15 @@
 import threading
 
 from fastapi import APIRouter, Query
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.ai import word2vec_ref
 from app.ai.pipeline import train_all
 from app.ai.semantic_index import index
-from app.core.database import SessionLocal
+from app.core.database import Database
 from app.core.deps import DB, AdminUser
-from app.models import ModelRun, Product
+from app.models import ModelRun
 from app.schemas.serializers import iso
+from app.services.loaders import with_category
 from app.services.meta import city_config
 from app.services.search import SearchParams, keyword_scores, run_search
 from app.utils.text import normalize_query
@@ -46,7 +45,7 @@ MODEL_INFO = {
 
 @router.get("/models")
 def models(db: DB):
-    runs = db.scalars(select(ModelRun).order_by(ModelRun.created_at.desc()).limit(200)).all()
+    runs = db.model_runs.find(sort=[("created_at", -1)], limit=200)
     latest: dict[str, ModelRun] = {}
     history: dict[str, list] = {}
     for r in runs:
@@ -78,8 +77,7 @@ def retrain(_: AdminUser):
     def job():
         _training.set()
         try:
-            with SessionLocal() as db:
-                train_all(db)
+            train_all(Database())
         finally:
             _training.clear()
 
@@ -91,8 +89,8 @@ def retrain(_: AdminUser):
 def search_compare(db: DB, q: str = Query(..., min_length=2, max_length=120), limit: int = Query(6, ge=1, le=20)):
     """Same query through each method, over all listings (no location filter), top unique items."""
     norm = normalize_query(q)
-    products = {p.id: p for p in db.scalars(select(Product).options(selectinload(Product.category))
-                                             .where(Product.is_active.is_(True)))}
+    products = {p.id: p for p in with_category(
+        db, db.products.find({"is_active": True}, projection={"description": 0, "specs": 0}))}
 
     def top_unique(scores: dict[int, float]) -> list[dict]:
         seen, out = set(), []

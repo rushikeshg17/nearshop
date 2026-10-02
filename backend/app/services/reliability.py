@@ -6,135 +6,92 @@ Everything shown to customers is a statement they can understand and verify:
 from datetime import timedelta
 from statistics import median
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
-from app.core.database import utcnow
-from app.models import (
-    InventoryEvent,
-    InventoryReason,
-    Order,
-    Reservation,
-    Review,
-    StatusEvent,
-)
-from app.models import (
-    OrderStatus as OS,
-)
-from app.models import (
-    ReservationStatus as RS,
-)
+from app.core.database import Database, utcnow
+from app.models import InventoryReason, Shop
+from app.models import OrderStatus as OS
+from app.models import ReservationStatus as RS
 
 WINDOW_DAYS = 90
 OWNER_REASONS = [InventoryReason.INITIAL.value, InventoryReason.RESTOCK.value, InventoryReason.ADJUSTMENT.value]
+HELD = {RS.CONFIRMED.value, RS.READY_FOR_PICKUP.value}
 
 
-def ratings_for(db: Session, shop_ids: list[int]) -> dict[int, tuple[float, int]]:
-    if not shop_ids:
-        return {}
-    rows = db.execute(
-        select(Review.shop_id, func.avg(Review.rating), func.count(Review.id))
-        .where(Review.shop_id.in_(shop_ids))
-        .group_by(Review.shop_id)
-    ).all()
-    return {sid: (round(float(avg), 1), int(n)) for sid, avg, n in rows}
-
-
-def shop_reliability(db: Session, shop) -> dict:
+def shop_reliability(db: Database, shop: Shop) -> dict:
     now = utcnow()
     since = now - timedelta(days=WINDOW_DAYS)
 
-    update_days = db.scalar(
-        select(func.count(func.distinct(func.date(InventoryEvent.created_at)))).where(
-            InventoryEvent.shop_id == shop.id,
-            InventoryEvent.reason.in_(OWNER_REASONS),
-            InventoryEvent.created_at >= now - timedelta(days=7),
-        )
-    ) or 0
+    def update_days() -> int:
+        # Distinct (IST) days in the last week on which the owner touched stock.
+        rows = db.inventory_events.aggregate([
+            {"$match": {"shop_id": shop.id, "created_at": {"$gte": now - timedelta(days=7)},
+                        "reason": {"$in": OWNER_REASONS}}},
+            {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}}}},
+            {"$count": "days"},
+        ])
+        return rows[0]["days"] if rows else 0
 
-    res_counts = dict(
-        db.execute(
-            select(Reservation.status, func.count())
-            .where(Reservation.shop_id == shop.id, Reservation.created_at >= since)
-            .group_by(Reservation.status)
-        ).all()
-    )
+    def reservations() -> list[dict]:
+        return db.reservations.find_raw({"shop_id": shop.id, "created_at": {"$gte": since}},
+                                        {"status": 1, "created_at": 1, "confirmed_at": 1})
+
+    def transitions() -> list[dict]:
+        return db.status_events.aggregate([
+            {"$match": {"shop_id": shop.id, "created_at": {"$gte": since}}},
+            {"$group": {"_id": {"entity": "$entity", "from": "$from_status", "to": "$to_status",
+                                "actor": "$actor_role"}, "n": {"$sum": 1}}},
+        ])
+
+    def delivered() -> int:
+        return db.orders.count({"shop_id": shop.id, "status": OS.DELIVERED, "created_at": {"$gte": since}})
+
+    def accuracy() -> float | None:
+        rows = db.reviews.aggregate([
+            {"$match": {"shop_id": shop.id, "accuracy_rating": {"$ne": None}}},
+            {"$group": {"_id": None, "avg": {"$avg": "$accuracy_rating"}}},
+        ])
+        return rows[0]["avg"] if rows else None
+
+    days, res_rows, events, orders_delivered, avg_accuracy = db.gather(
+        update_days, reservations, transitions, delivered, accuracy)
+
+    def moved(*, entity: str | None = "reservation", frm: set | None = None, to: set | None = None,
+              actor: str | None = None) -> int:
+        return sum(e["n"] for e in events
+                   if (entity is None or e["_id"]["entity"] == entity)
+                   and (frm is None or e["_id"]["from"] in frm)
+                   and (to is None or e["_id"]["to"] in to)
+                   and (actor is None or e["_id"]["actor"] == actor))
+
     # Held reservations that ended without a pickup (customer no-show, cancellation, expiry).
-    dropped_after_hold = db.scalar(
-        select(func.count()).select_from(StatusEvent).where(
-            StatusEvent.shop_id == shop.id,
-            StatusEvent.entity == "reservation",
-            StatusEvent.from_status.in_([RS.CONFIRMED.value, RS.READY_FOR_PICKUP.value]),
-            StatusEvent.to_status.in_([RS.CANCELLED.value, RS.EXPIRED.value]),
-            StatusEvent.created_at >= since,
-        )
-    ) or 0
-    responded = db.scalar(
-        select(func.count()).select_from(StatusEvent).where(
-            StatusEvent.shop_id == shop.id,
-            StatusEvent.entity == "reservation",
-            StatusEvent.from_status == RS.REQUESTED.value,
-            StatusEvent.to_status == RS.CONFIRMED.value,
-            StatusEvent.created_at >= since,
-        )
-    ) or 0
-    rejected = res_counts.get(RS.REJECTED, 0)
-    request_expired = db.scalar(
-        select(func.count()).select_from(StatusEvent).where(
-            StatusEvent.shop_id == shop.id,
-            StatusEvent.entity == "reservation",
-            StatusEvent.from_status == RS.REQUESTED.value,
-            StatusEvent.to_status == RS.EXPIRED.value,
-            StatusEvent.created_at >= since,
-        )
-    ) or 0
+    dropped_after_hold = moved(frm=HELD, to={RS.CANCELLED.value, RS.EXPIRED.value})
+    responded = moved(frm={RS.REQUESTED.value}, to={RS.CONFIRMED.value})
+    request_expired = moved(frm={RS.REQUESTED.value}, to={RS.EXPIRED.value})
+    shop_cancels = moved(entity=None, to={"CANCELLED"}, actor="owner")
+    rejected = sum(1 for r in res_rows if r["status"] == RS.REJECTED)
+    completed = sum(1 for r in res_rows if r["status"] == RS.COMPLETED)
     requests_decided = responded + rejected + request_expired
-    completed = res_counts.get(RS.COMPLETED, 0)
-    shop_cancels = db.scalar(
-        select(func.count()).select_from(StatusEvent).where(
-            StatusEvent.shop_id == shop.id,
-            StatusEvent.to_status == "CANCELLED",
-            StatusEvent.actor_role == "owner",
-            StatusEvent.created_at >= since,
-        )
-    ) or 0
 
     # Median minutes from request to confirmation.
-    pairs = db.execute(
-        select(Reservation.created_at, Reservation.confirmed_at).where(
-            Reservation.shop_id == shop.id, Reservation.confirmed_at.is_not(None), Reservation.created_at >= since
-        )
-    ).all()
-    response_minutes = [(c - r).total_seconds() / 60 for r, c in pairs if c and c >= r]
+    response_minutes = [(r["confirmed_at"] - r["created_at"]).total_seconds() / 60 for r in res_rows
+                        if r.get("confirmed_at") and r["confirmed_at"] >= r["created_at"]]
     median_response = round(median(response_minutes)) if response_minutes else None
 
-    delivered = db.scalar(
-        select(func.count()).select_from(Order).where(
-            Order.shop_id == shop.id, Order.status == OS.DELIVERED, Order.created_at >= since
-        )
-    ) or 0
-
-    rating = ratings_for(db, [shop.id]).get(shop.id, (None, 0))
-    avg_accuracy = db.scalar(
-        select(func.avg(Review.accuracy_rating)).where(Review.shop_id == shop.id, Review.accuracy_rating.is_not(None))
-    )
-
     highlights: list[str] = []
-    if update_days >= 5:
+    if days >= 5:
         highlights.append("Frequently updated inventory")
     if requests_decided >= 5 and responded / requests_decided >= 0.9:
         highlights.append(f"Confirmed {responded} of {requests_decided} reservation requests")
     if median_response is not None and median_response <= 10 and len(response_minutes) >= 5:
         highlights.append(f"Usually confirms in about {max(median_response, 1)} min")
-    if avg_accuracy and avg_accuracy >= 4.5 and rating[1] >= 5:
+    if avg_accuracy and avg_accuracy >= 4.5 and shop.rating_count >= 5:
         highlights.append("Customers say items match the listing")
     if shop.established_year and now.year - shop.established_year >= 15:
         highlights.append(f"Serving since {shop.established_year}")
 
     return {
         "inventory_updated_at": shop.inventory_updated_at,
-        "inventory_update_days_7d": update_days,
-        "frequently_updated": update_days >= 5,
+        "inventory_update_days_7d": days,
+        "frequently_updated": days >= 5,
         "reservation_requests_90d": requests_decided,
         "reservations_confirmed_90d": responded,
         "acceptance_rate": round(responded / requests_decided, 3) if requests_decided else None,
@@ -143,9 +100,9 @@ def shop_reliability(db: Session, shop) -> dict:
         ),
         "shop_cancellations_90d": shop_cancels,
         "median_response_minutes": median_response,
-        "orders_delivered_90d": delivered,
-        "rating_avg": rating[0],
-        "rating_count": rating[1],
+        "orders_delivered_90d": orders_delivered,
+        "rating_avg": shop.rating_avg,
+        "rating_count": shop.rating_count,
         "accuracy_avg": round(float(avg_accuracy), 1) if avg_accuracy else None,
         "highlights": highlights,
     }

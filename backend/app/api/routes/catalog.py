@@ -1,32 +1,30 @@
 """Public product and shop pages."""
+import re
 from datetime import timedelta
 from statistics import median
 
 from fastapi import APIRouter, Query
-from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
 
 from app.ai.recommend import bundle_for
-from app.core.database import utcnow
+from app.core.database import Database, utcnow
 from app.core.deps import DB, OptionalUser
 from app.core.errors import NotFound
-from app.models import (
-    CatalogItem,
-    Category,
-    Product,
-    Reservation,
-    Review,
-    Role,
-    SalesRecord,
-    Shop,
-)
+from app.models import Product, Role, Shop
 from app.schemas.serializers import listing, review_out, shop_brief, shop_detail
 from app.services import reservations as reservation_service
+from app.services.loaders import (
+    category_by_slug,
+    product_names,
+    with_categories,
+    with_category,
+    with_customers,
+    with_shops,
+)
 from app.services.meta import city_config
 from app.services.orders import quote_delivery
-from app.services.reliability import ratings_for, shop_reliability
+from app.services.reliability import shop_reliability
 from app.services.search import SearchParams, run_search
-from app.utils.geo import haversine_km
+from app.utils.geo import haversine_km, within_km
 
 router = APIRouter(tags=["catalog"])
 
@@ -35,12 +33,10 @@ def _dist(lat, lng, s: Shop) -> float | None:
     return haversine_km(lat, lng, s.lat, s.lng) if lat is not None and lng is not None else None
 
 
-def price_insight(db, product: Product) -> dict | None:
-    if not product.catalog_item_id:
+def price_insight(product: Product, prices: list[float]) -> dict | None:
+    """Where this price sits among every active listing of the same catalogue item."""
+    if not product.catalog_item_id or not prices:
         return None
-    prices = db.scalars(
-        select(Product.price).where(Product.catalog_item_id == product.catalog_item_id, Product.is_active.is_(True))
-    ).all()
     if len(prices) < 3:
         return {"peer_count": len(prices), "median": None, "min": min(prices), "max": max(prices), "statement": None}
     med = float(median(prices))
@@ -56,52 +52,60 @@ def price_insight(db, product: Product) -> dict | None:
             "deviation_pct": round(pct, 1), "statement": statement}
 
 
+def _sold_last_30d(db: Database, product_id: int) -> int:
+    rows = db.sales_history.aggregate([
+        {"$match": {"product_id": product_id, "sold_at": {"$gte": utcnow() - timedelta(days=30)}}},
+        {"$group": {"_id": None, "n": {"$sum": "$quantity"}}},
+    ])
+    return int(rows[0]["n"]) if rows else 0
+
+
 @router.get("/products/{product_id}")
 def product_detail(product_id: int, db: DB, user: OptionalUser, lat: float | None = None, lng: float | None = None):
-    p = db.get(Product, product_id)
+    p = db.products.get(product_id)
     if p is None or not p.is_active:
         raise NotFound("This product is no longer listed")
-    shop = p.shop
+    with_category(db, [p])
+
+    def same_item() -> list[Product]:
+        # Every active listing of this catalogue item, this one included (for the price insight).
+        if not p.catalog_item_id:
+            return []
+        return with_shops(db, db.products.find({"catalog_item_id": p.catalog_item_id, "is_active": True}),
+                          active_only=True)
+
+    def my_reservation() -> dict | None:
+        if not (user and user.role == Role.CUSTOMER):
+            return None
+        r = db.reservations.find_one({"customer_id": user.id, "product_id": p.id,
+                                      "status": {"$in": list(reservation_service.ACTIVE)}})
+        return {"id": r.id, "code": r.code, "status": r.status.value} if r else None
+
+    shop, catalog, peers, own_reviews, sold_30d, reservation = db.gather(
+        lambda: with_categories(db, [db.shops.get(p.shop_id)])[0],
+        lambda: db.catalog_items.get(p.catalog_item_id),
+        same_item,
+        lambda: db.reviews.find({"product_id": p.id}, sort=[("created_at", -1)], limit=6),
+        lambda: _sold_last_30d(db, p.id),
+        my_reservation,
+    )
     distance = _dist(lat, lng, shop)
 
-    others = []
-    if p.catalog_item_id:
-        rows = db.scalars(
-            select(Product)
-            .options(selectinload(Product.shop).selectinload(Shop.categories), selectinload(Product.category))
-            .join(Shop)
-            .where(Product.catalog_item_id == p.catalog_item_id, Product.id != p.id, Product.is_active.is_(True),
-                   Shop.is_active.is_(True))
-        ).all()
-        ratings = ratings_for(db, [r.shop_id for r in rows])
-        others = [listing(r, shop_brief(r.shop, _dist(lat, lng, r.shop), ratings.get(r.shop_id))) for r in rows]
-        others.sort(key=lambda o: (o["quantity"] <= 0, o["shop"]["distance_km"] if o["shop"]["distance_km"]
-                                   is not None else o["price"]))
+    others = [listing(r, shop_brief(r.shop, _dist(lat, lng, r.shop))) for r in peers if r.id != p.id]
+    others.sort(key=lambda o: (o["quantity"] <= 0, o["shop"]["distance_km"] if o["shop"]["distance_km"]
+                               is not None else o["price"]))
 
     # Reviews of this exact listing first, then recent reviews of the shop.
-    base = select(Review).options(selectinload(Review.customer)).order_by(Review.created_at.desc())
-    reviews = list(db.scalars(base.where(Review.product_id == p.id).limit(6)))
+    reviews = list(own_reviews)
     if len(reviews) < 6:
-        reviews += db.scalars(
-            base.where(Review.shop_id == shop.id, Review.product_id.is_distinct_from(p.id)).limit(6 - len(reviews))
-        ).all()
-    product_names = dict(db.execute(select(Product.id, Product.name).where(
-        Product.id.in_([r.product_id for r in reviews if r.product_id]))).all())
-
-    sold_30d = db.scalar(
-        select(func.coalesce(func.sum(SalesRecord.quantity), 0)).where(
-            SalesRecord.product_id == p.id, SalesRecord.sold_at >= utcnow() - timedelta(days=30))
+        reviews += db.reviews.find({"shop_id": shop.id, "product_id": {"$ne": p.id}},
+                                   sort=[("created_at", -1)], limit=6 - len(reviews))
+    reliability, _, names = db.gather(
+        lambda: shop_reliability(db, shop),
+        lambda: with_customers(db, reviews),
+        lambda: product_names(db, (r.product_id for r in reviews)),
     )
 
-    my_reservation = None
-    if user and user.role == Role.CUSTOMER:
-        r = db.scalar(select(Reservation).where(
-            Reservation.customer_id == user.id, Reservation.product_id == p.id,
-            Reservation.status.in_(reservation_service.ACTIVE)))
-        if r:
-            my_reservation = {"id": r.id, "code": r.code, "status": r.status.value}
-
-    catalog = p.catalog_item
     return {
         **listing(p, None),
         "description": p.description,
@@ -110,47 +114,54 @@ def product_detail(product_id: int, db: DB, user: OptionalUser, lat: float | Non
         "category_detail": {"slug": p.category.slug, "name": p.category.name, "icon": p.category.icon,
                             "color_hue": p.category.color_hue},
         "subcategory": catalog.subcategory if catalog else None,
-        "shop": shop_detail(shop, distance, shop_reliability(db, shop)),
+        "shop": shop_detail(shop, distance, reliability),
         "other_offers": others,
-        "price_insight": price_insight(db, p),
+        "price_insight": price_insight(p, [r.price for r in peers]),
         "delivery_quote": quote_delivery(shop, lat, lng, p.price) if lat is not None and lng is not None else None,
-        "reviews": [review_out(r, product_names.get(r.product_id)) for r in reviews],
-        "sold_last_30d": int(sold_30d or 0),
-        "my_reservation": my_reservation,
+        "reviews": [review_out(r, names.get(r.product_id)) for r in reviews],
+        "sold_last_30d": sold_30d,
+        "my_reservation": reservation,
     }
 
 
 @router.get("/products/{product_id}/recommendations")
 def product_recommendations(product_id: int, db: DB, lat: float | None = None, lng: float | None = None):
-    p = db.get(Product, product_id)
+    p = db.products.get(product_id)
     if p is None:
         raise NotFound("Product not found")
-    lat = lat if lat is not None else p.shop.lat
-    lng = lng if lng is not None else p.shop.lng
+    shop, catalog = db.gather(lambda: db.shops.get(p.shop_id), lambda: db.catalog_items.get(p.catalog_item_id))
+    lat = lat if lat is not None else shop.lat
+    lng = lng if lng is not None else shop.lng
 
     source = "apriori"
     targets = bundle_for(db, p.catalog_item_id) if p.catalog_item_id else []
     if not targets:
         source = "popular"
-        sub = p.catalog_item.subcategory if p.catalog_item else None
-        popular = db.execute(
-            select(CatalogItem.id, func.sum(SalesRecord.quantity).label("n"))
-            .join(SalesRecord, SalesRecord.catalog_item_id == CatalogItem.id)
-            .where(CatalogItem.category_id == p.category_id, CatalogItem.id != (p.catalog_item_id or -1),
-                   *( [CatalogItem.subcategory != sub] if sub else [] ))
-            .group_by(CatalogItem.id).order_by(func.sum(SalesRecord.quantity).desc()).limit(6)
-        ).all()
-        targets = [{"catalog_item_id": cid, "confidence": None, "lift": None, "support": None} for cid, _ in popular]
+        sub = catalog.subcategory if catalog else None
+        # Best sellers in the same category, from a different subcategory than this item.
+        query: dict = {"category_id": p.category_id, "_id": {"$ne": p.catalog_item_id or -1}}
+        if sub:
+            query["subcategory"] = {"$ne": sub}
+        candidates = [d["_id"] for d in db.catalog_items.find_raw(query, {"_id": 1})]
+        popular = db.sales_history.aggregate([
+            {"$match": {"catalog_item_id": {"$in": candidates}}},
+            {"$group": {"_id": "$catalog_item_id", "n": {"$sum": "$quantity"}}},
+            {"$sort": {"n": -1}},
+            {"$limit": 6},
+        ]) if candidates else []
+        targets = [{"catalog_item_id": r["_id"], "confidence": None, "lift": None, "support": None} for r in popular]
+
+    # One query for the in-stock offers of every recommended item.
+    offers_by_item: dict[int, list[Product]] = {}
+    target_ids = [t["catalog_item_id"] for t in targets]
+    if target_ids:
+        for o in with_shops(db, db.products.find({"catalog_item_id": {"$in": target_ids}, "is_active": True,
+                                                  "quantity": {"$gt": 0}}), active_only=True):
+            offers_by_item.setdefault(o.catalog_item_id, []).append(o)
 
     items = []
     for t in targets:
-        offers = db.scalars(
-            select(Product).options(selectinload(Product.shop).selectinload(Shop.categories),
-                                    selectinload(Product.category))
-            .join(Shop)
-            .where(Product.catalog_item_id == t["catalog_item_id"], Product.is_active.is_(True),
-                   Product.quantity > 0, Shop.is_active.is_(True))
-        ).all()
+        offers = offers_by_item.get(t["catalog_item_id"])
         if not offers:
             continue
         same = next((o for o in offers if o.shop_id == p.shop_id), None)
@@ -178,19 +189,21 @@ def list_shops(
     if lat is None or lng is None:
         c = city_config()["center"]
         lat, lng = c["lat"], c["lng"]
-    stmt = select(Shop).options(selectinload(Shop.categories)).where(Shop.is_active.is_(True))
+    query: dict = {"is_active": True, "location": within_km(lat, lng, radius_km)}
     if category:
-        stmt = stmt.where(Shop.categories.any(Category.slug == category))
+        cat = category_by_slug(db, category)
+        query["category_ids"] = cat.id if cat else -1
     if q:
-        like = f"%{q.strip()}%"
-        stmt = stmt.where((Shop.name.ilike(like)) | (Shop.locality.ilike(like)) | (Shop.tagline.ilike(like)))
-    shops = [(s, haversine_km(lat, lng, s.lat, s.lng)) for s in db.scalars(stmt)]
-    shops = [(s, d) for s, d in shops if d <= radius_km]
-    ratings = ratings_for(db, [s.id for s, _ in shops])
-    counts = dict(db.execute(
-        select(Product.shop_id, func.count()).where(Product.is_active.is_(True), Product.quantity > 0)
-        .group_by(Product.shop_id)).all())
-    out = [{**shop_brief(s, d, ratings.get(s.id)), "in_stock_listings": counts.get(s.id, 0)} for s, d in shops]
+        like = {"$regex": re.escape(q.strip()), "$options": "i"}
+        query["$or"] = [{"name": like}, {"locality": like}, {"tagline": like}]
+    found, counts = db.gather(
+        lambda: with_categories(db, db.shops.find(query)),
+        lambda: {r["_id"]: r["n"] for r in db.products.aggregate([
+            {"$match": {"is_active": True, "quantity": {"$gt": 0}}},
+            {"$group": {"_id": "$shop_id", "n": {"$sum": 1}}}])},
+    )
+    shops = [(s, haversine_km(lat, lng, s.lat, s.lng)) for s in found]
+    out = [{**shop_brief(s, d), "in_stock_listings": counts.get(s.id, 0)} for s, d in shops if d <= radius_km]
     if sort == "rating":
         out.sort(key=lambda s: (-(s["rating_avg"] or 0), s["distance_km"]))
     elif sort == "fresh":
@@ -200,23 +213,23 @@ def list_shops(
     return {"shops": out, "center": {"lat": lat, "lng": lng}, "radius_km": radius_km}
 
 
-def _shop_by_slug(db, slug: str) -> Shop:
-    shop = db.scalar(select(Shop).options(selectinload(Shop.categories)).where(Shop.slug == slug))
+def _shop_by_slug(db: Database, slug: str) -> Shop:
+    shop = db.shops.find_one({"slug": slug})
     if shop is None or not shop.is_active:
         raise NotFound("Shop not found")
-    return shop
+    return with_categories(db, [shop])[0]
 
 
 @router.get("/shops/{slug}")
 def shop_page(slug: str, db: DB, lat: float | None = None, lng: float | None = None):
     shop = _shop_by_slug(db, slug)
-    data = shop_detail(shop, _dist(lat, lng, shop), shop_reliability(db, shop))
-    data["listing_counts"] = {
-        "total": db.scalar(select(func.count()).select_from(Product).where(
-            Product.shop_id == shop.id, Product.is_active.is_(True))) or 0,
-        "in_stock": db.scalar(select(func.count()).select_from(Product).where(
-            Product.shop_id == shop.id, Product.is_active.is_(True), Product.quantity > 0)) or 0,
-    }
+    reliability, total, in_stock = db.gather(
+        lambda: shop_reliability(db, shop),
+        lambda: db.products.count({"shop_id": shop.id, "is_active": True}),
+        lambda: db.products.count({"shop_id": shop.id, "is_active": True, "quantity": {"$gt": 0}}),
+    )
+    data = shop_detail(shop, _dist(lat, lng, shop), reliability)
+    data["listing_counts"] = {"total": total, "in_stock": in_stock}
     return data
 
 
@@ -245,13 +258,12 @@ def shop_products(
 @router.get("/shops/{slug}/reviews")
 def shop_reviews(slug: str, db: DB, page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=50)):
     shop = _shop_by_slug(db, slug)
-    rows = db.scalars(
-        select(Review).options(selectinload(Review.customer)).where(Review.shop_id == shop.id)
-        .order_by(Review.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    ).all()
-    names = dict(db.execute(select(Product.id, Product.name).where(
-        Product.id.in_([r.product_id for r in rows if r.product_id]))).all())
-    dist = dict(db.execute(select(Review.rating, func.count()).where(Review.shop_id == shop.id)
-                           .group_by(Review.rating)).all())
+    rows, dist = db.gather(
+        lambda: with_customers(db, db.reviews.find({"shop_id": shop.id}, sort=[("created_at", -1)],
+                                                   skip=(page - 1) * page_size, limit=page_size)),
+        lambda: {r["_id"]: r["n"] for r in db.reviews.aggregate([
+            {"$match": {"shop_id": shop.id}}, {"$group": {"_id": "$rating", "n": {"$sum": 1}}}])},
+    )
+    names = product_names(db, (r.product_id for r in rows))
     return {"reviews": [review_out(r, names.get(r.product_id)) for r in rows],
             "distribution": {str(k): dist.get(k, 0) for k in range(1, 6)}}

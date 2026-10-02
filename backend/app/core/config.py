@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     app_name: str = "NearShop"
     environment: str = "development"
 
-    # Database: SQLite is the V1 requirement. SQLAlchemy keeps it portable.
-    database_url: str = f"sqlite:///{BACKEND_DIR / 'nearshop.db'}"
+    # Database: MongoDB (Atlas or any replica set; transactions need a replica set).
+    mongodb_uri: str = "mongodb://localhost:27017/?replicaSet=rs0"
+    mongodb_db: str = "nearshop"
 
     # Auth. secret_key MUST be overridden outside development.
     secret_key: str = "dev-only-change-me"
@@ -39,6 +40,7 @@ class Settings(BaseSettings):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     model_dir: Path = BACKEND_DIR / "ml_artifacts"
     enable_scheduler: bool = True
+    warm_on_startup: bool = True  # check the schema and build the semantic index when the API starts
 
 
 @lru_cache

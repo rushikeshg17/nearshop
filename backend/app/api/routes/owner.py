@@ -1,25 +1,16 @@
 """Shop owner: shop settings, inventory, catalog, reservation and delivery queues, insights."""
+import re
 from typing import Literal
 
 from fastapi import APIRouter, File, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
 
 from app.ai.semantic_index import index
+from app.core.database import Database
 from app.core.deps import DB, OwnerShop, OwnerUser
 from app.core.errors import AppError, Conflict, NotFound
-from app.models import (
-    CatalogItem,
-    Category,
-    InventoryReason,
-    Order,
-    Product,
-    Reservation,
-    Review,
-    StatusEvent,
-)
+from app.models import Category, GeoPoint, InventoryReason, Order, Product, Reservation, Shop
 from app.schemas.requests import (
     CatalogAddIn,
     ProductIn,
@@ -32,12 +23,32 @@ from app.schemas.serializers import listing, order_out, reservation_out, review_
 from app.services import analytics, importer
 from app.services import orders as order_service
 from app.services import reservations as reservation_service
-from app.services.inventory import change_stock, set_stock
+from app.services.inventory import apply_bulk, change_stock, set_stock
+from app.services.loaders import (
+    categories,
+    category_by_slug,
+    hydrate_orders,
+    hydrate_reservations,
+    product_names,
+    timelines,
+    with_category,
+    with_customers,
+)
 from app.services.media import delete_image, save_image
 from app.services.reliability import shop_reliability
+from app.services.search import reset_vocabulary
 from app.utils.text import normalize_query
 
 router = APIRouter(prefix="/owner", tags=["shop owner"])
+
+RES_ACTIVE = list(reservation_service.ACTIVE)
+ORDER_OPEN = [*order_service.ACTIVE, "DELIVERY_FAILED"]
+
+
+def _listings_changed() -> None:
+    """Search caches (semantic index, spelling vocabulary) are rebuilt on the next query."""
+    index.mark_dirty()
+    reset_vocabulary()
 
 
 # ------------------------------------------------------------------ shop
@@ -51,15 +62,19 @@ def my_shop(shop: OwnerShop, db: DB):
 def update_shop(body: ShopUpdateIn, shop: OwnerShop, db: DB):
     data = body.model_dump(exclude_unset=True)
     if "category_slugs" in data:
-        cats = db.scalars(select(Category).where(Category.slug.in_(data.pop("category_slugs")))).all()
+        slugs = set(data.pop("category_slugs"))
+        cats = [c for c in categories(db).values() if c.slug in slugs]
         if not cats:
             raise AppError("Choose at least one category")
+        data["category_ids"] = [c.id for c in cats]
         shop.categories = cats
-    for k, v in data.items():
-        setattr(shop, k, v)
-    if shop.offers_delivery and shop.delivery_radius_km <= 0:
+    if "lat" in data or "lng" in data:
+        data["location"] = GeoPoint.of(data.pop("lat", None) or shop.lat, data.pop("lng", None) or shop.lng)
+    offers_delivery = data.get("offers_delivery", shop.offers_delivery)
+    if offers_delivery and data.get("delivery_radius_km", shop.delivery_radius_km) <= 0:
         raise AppError("Set a delivery radius to offer delivery")
-    db.commit()
+    if data:
+        db.shops.set(shop, **data)
     return shop_detail(shop, None, shop_reliability(db, shop))
 
 
@@ -67,21 +82,20 @@ def update_shop(body: ShopUpdateIn, shop: OwnerShop, db: DB):
 async def upload_shop_image(shop: OwnerShop, db: DB, file: UploadFile = File(...)):
     rel = await save_image(file, "shops")
     delete_image(shop.image_path)
-    shop.image_path = rel
-    db.commit()
+    db.shops.set(shop, image_path=rel)
     return {"image_url": f"/media/{rel}"}
 
 
 @router.get("/overview")
 def overview(shop: OwnerShop, db: DB):
     reservation_service.expire_due(db)
-    data = analytics.owner_overview(db, shop)
-    requests = db.scalars(select(Reservation).where(
-        Reservation.shop_id == shop.id, Reservation.status == "REQUESTED").order_by(Reservation.created_at)).all()
-    pending = db.scalars(select(Order).where(Order.shop_id == shop.id, Order.status == "PENDING")
-                         .order_by(Order.created_at)).all()
-    data["reservation_requests"] = [_res(db, r) for r in requests[:6]]
-    data["pending_orders"] = [_ord(db, o) for o in pending[:6]]
+    data, requests, pending = db.gather(
+        lambda: analytics.owner_overview(db, shop),
+        lambda: db.reservations.find({"shop_id": shop.id, "status": "REQUESTED"}, sort=[("created_at", 1)], limit=6),
+        lambda: db.orders.find({"shop_id": shop.id, "status": "PENDING"}, sort=[("created_at", 1)], limit=6),
+    )
+    data["reservation_requests"] = _res(db, requests)
+    data["pending_orders"] = _ord(db, pending)
     data["shop"] = {"id": shop.id, "name": shop.name, "slug": shop.slug, "offers_delivery": shop.offers_delivery}
     return data
 
@@ -93,20 +107,18 @@ def insights(shop: OwnerShop, db: DB):
 
 @router.get("/reviews")
 def reviews(shop: OwnerShop, db: DB):
-    rows = db.scalars(select(Review).options(selectinload(Review.customer)).where(Review.shop_id == shop.id)
-                      .order_by(Review.created_at.desc()).limit(50)).all()
-    names = dict(db.execute(select(Product.id, Product.name).where(
-        Product.id.in_([r.product_id for r in rows if r.product_id]))).all())
+    rows = with_customers(db, db.reviews.find({"shop_id": shop.id}, sort=[("created_at", -1)], limit=50))
+    names = product_names(db, (r.product_id for r in rows))
     return [review_out(r, names.get(r.product_id)) for r in rows]
 
 
 # ------------------------------------------------------------------ inventory
 
-def _own_product(db, shop, product_id: int) -> Product:
-    p = db.get(Product, product_id)
+def _own_product(db: Database, shop: Shop, product_id: int) -> Product:
+    p = db.products.get(product_id)
     if p is None or p.shop_id != shop.id:
         raise NotFound("Product not found in your shop")
-    return p
+    return with_category(db, [p])[0]
 
 
 def _keywords(tags: list[str], category: Category, subcategory: str | None = None) -> str:
@@ -123,25 +135,29 @@ def list_products(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ):
-    stmt = select(Product).options(selectinload(Product.category)).where(Product.shop_id == shop.id)
-    stmt = stmt.where(Product.is_active.is_(stock != "inactive"))
+    query: dict = {"shop_id": shop.id, "is_active": stock != "inactive"}
     if stock == "in_stock":
-        stmt = stmt.where(Product.quantity > Product.low_stock_threshold)
+        query["$expr"] = {"$gt": ["$quantity", "$low_stock_threshold"]}
     elif stock == "low_stock":
-        stmt = stmt.where(Product.quantity > 0, Product.quantity <= Product.low_stock_threshold)
+        query["quantity"] = {"$gt": 0}
+        query["$expr"] = {"$lte": ["$quantity", "$low_stock_threshold"]}
     elif stock == "out_of_stock":
-        stmt = stmt.where(Product.quantity == 0)
+        query["quantity"] = 0
     if category:
-        stmt = stmt.join(Category, Category.id == Product.category_id).where(Category.slug == category)
+        cat = category_by_slug(db, category)
+        query["category_id"] = cat.id if cat else -1
     if q:
-        like = f"%{normalize_query(q)}%"
-        stmt = stmt.where(Product.name.ilike(like) | Product.brand.ilike(like) | Product.sku.ilike(like))
+        like = {"$regex": re.escape(normalize_query(q)), "$options": "i"}
+        query["$or"] = [{"name": like}, {"brand": like}, {"sku": like}]
     order = {
-        "name": Product.name, "stock_asc": Product.quantity, "stock_desc": Product.quantity.desc(),
-        "price_asc": Product.price, "price_desc": Product.price.desc(), "updated": Product.stock_updated_at.desc(),
+        "name": [("name", 1)], "stock_asc": [("quantity", 1)], "stock_desc": [("quantity", -1)],
+        "price_asc": [("price", 1)], "price_desc": [("price", -1)], "updated": [("stock_updated_at", -1)],
     }[sort]
-    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    rows = db.scalars(stmt.order_by(order).offset((page - 1) * page_size).limit(page_size)).all()
+    total, rows = db.gather(
+        lambda: db.products.count(query),
+        lambda: with_category(db, db.products.find(query, sort=[*order, ("_id", 1)], skip=(page - 1) * page_size,
+                                                   limit=page_size)),
+    )
     items = [
         {**listing(p), "sku": p.sku, "description": p.description, "specs": p.specs or {}, "keywords": p.keywords}
         for p in rows
@@ -151,19 +167,21 @@ def list_products(
 
 @router.post("/products")
 def create_product(body: ProductIn, shop: OwnerShop, user: OwnerUser, db: DB):
-    cat = db.scalar(select(Category).where(Category.slug == body.category_slug))
+    cat = category_by_slug(db, body.category_slug)
     if cat is None:
         raise AppError("Unknown category")
     p = Product(shop_id=shop.id, category_id=cat.id, name=body.name, brand=body.brand, sku=body.sku,
                 unit=body.unit, description=body.description, specs=body.specs,
                 keywords=_keywords([t.lower() for t in body.tags], cat), icon=cat.icon, price=body.price,
-                mrp=body.mrp, quantity=0, low_stock_threshold=body.low_stock_threshold)
-    db.add(p)
-    db.flush()
-    if body.quantity:
-        change_stock(db, p, body.quantity, InventoryReason.INITIAL, user.id)
-    db.commit()
-    index.mark_dirty()
+                mrp=body.mrp, quantity=0, low_stock_threshold=body.low_stock_threshold, category=cat)
+
+    def create() -> None:
+        db.products.insert(p)
+        if body.quantity:
+            change_stock(db, p, body.quantity, InventoryReason.INITIAL, user.id)
+
+    db.transaction(create)
+    _listings_changed()
     return listing(p)
 
 
@@ -172,17 +190,15 @@ def update_product(product_id: int, body: ProductUpdateIn, shop: OwnerShop, db: 
     p = _own_product(db, shop, product_id)
     data = body.model_dump(exclude_unset=True)
     if "category_slug" in data:
-        cat = db.scalar(select(Category).where(Category.slug == data.pop("category_slug")))
+        cat = category_by_slug(db, data.pop("category_slug"))
         if cat is None:
             raise AppError("Unknown category")
-        p.category_id = cat.id
+        data["category_id"], p.category = cat.id, cat
     if "tags" in data:
-        cat = db.get(Category, p.category_id)
-        p.keywords = _keywords([t.lower() for t in data.pop("tags")], cat)
-    for k, v in data.items():
-        setattr(p, k, v)
-    db.commit()
-    index.mark_dirty()
+        data["keywords"] = _keywords([t.lower() for t in data.pop("tags")], p.category)
+    if data:
+        db.products.set(p, **data)
+    _listings_changed()
     return listing(p)
 
 
@@ -190,8 +206,6 @@ def update_product(product_id: int, body: ProductUpdateIn, shop: OwnerShop, db: 
 def update_stock(product_id: int, body: StockIn, shop: OwnerShop, user: OwnerUser, db: DB):
     p = _own_product(db, shop, product_id)
     set_stock(db, p, body.quantity, user.id)
-    db.commit()
-    db.refresh(p)
     return listing(p)
 
 
@@ -199,13 +213,11 @@ def update_stock(product_id: int, body: StockIn, shop: OwnerShop, user: OwnerUse
 def delete_product(product_id: int, shop: OwnerShop, db: DB):
     """Soft delete: the listing disappears from search but past orders and reviews keep their history."""
     p = _own_product(db, shop, product_id)
-    active_holds = db.scalar(select(func.count()).select_from(Reservation).where(
-        Reservation.product_id == p.id, Reservation.status.in_(reservation_service.ACTIVE))) or 0
+    active_holds = db.reservations.count({"product_id": p.id, "status": {"$in": RES_ACTIVE}})
     if active_holds:
         raise Conflict(f"This item has {active_holds} active reservation(s). Complete or cancel them first.")
-    p.is_active = False
-    db.commit()
-    index.mark_dirty()
+    db.products.set(p, is_active=False)
+    _listings_changed()
     return {"ok": True}
 
 
@@ -214,152 +226,146 @@ async def upload_product_image(product_id: int, shop: OwnerShop, db: DB, file: U
     p = _own_product(db, shop, product_id)
     rel = await save_image(file, "products")
     delete_image(p.image_path)
-    p.image_path = rel
-    db.commit()
+    db.products.set(p, image_path=rel)
     return listing(p)
 
 
 @router.get("/catalog")
 def browse_catalog(shop: OwnerShop, db: DB, q: str = Query("", max_length=120), category: str | None = None,
                    limit: int = Query(60, ge=1, le=200)):
-    listed = set(db.scalars(select(Product.catalog_item_id).where(
-        Product.shop_id == shop.id, Product.is_active.is_(True), Product.catalog_item_id.is_not(None))))
-    stmt = select(CatalogItem).options(selectinload(CatalogItem.category))
+    query: dict = {}
     if category:
-        stmt = stmt.join(Category, Category.id == CatalogItem.category_id).where(Category.slug == category)
+        cat = category_by_slug(db, category)
+        query["category_id"] = cat.id if cat else -1
     elif not q:
-        stmt = stmt.where(CatalogItem.category_id.in_([c.id for c in shop.categories]))
+        query["category_id"] = {"$in": shop.category_ids}
     if q:
-        like = f"%{normalize_query(q)}%"
-        stmt = stmt.where(CatalogItem.name.ilike(like) | CatalogItem.brand.ilike(like)
-                          | CatalogItem.subcategory.ilike(like))
-    # Local price guidance: median price of each item across other shops.
-    medians = {}
-    for cid, prices in _price_lists(db).items():
-        s = sorted(prices)
-        medians[cid] = s[len(s) // 2]
+        like = {"$regex": re.escape(normalize_query(q)), "$options": "i"}
+        query["$or"] = [{"name": like}, {"brand": like}, {"subcategory": like}]
+    found = with_category(db, db.catalog_items.find(query, sort=[("name", 1)], limit=limit))
+    ids = [c.id for c in found]
+    listed, medians = db.gather(
+        lambda: {d["catalog_item_id"] for d in db.products.find_raw(
+            {"shop_id": shop.id, "is_active": True, "catalog_item_id": {"$in": ids}}, {"catalog_item_id": 1})},
+        # Local price guidance: median price of each item across shops, computed in the database.
+        lambda: {r["_id"]: r["median"] for r in db.products.aggregate([
+            {"$match": {"is_active": True, "catalog_item_id": {"$in": ids}}},
+            {"$group": {"_id": "$catalog_item_id",
+                        "median": {"$median": {"input": "$price", "method": "approximate"}}}},
+        ])},
+    )
     items = [
         {"id": c.id, "name": c.name, "brand": c.brand, "unit": c.unit, "icon": c.icon, "mrp": c.mrp,
          "typical_price": c.typical_price, "local_median": medians.get(c.id), "category": c.category.slug,
          "subcategory": c.subcategory, "already_listed": c.id in listed}
-        for c in db.scalars(stmt.order_by(CatalogItem.name).limit(limit))
+        for c in found
     ]
     return {"items": items}
 
 
-def _price_lists(db) -> dict[int, list[float]]:
-    out: dict[int, list[float]] = {}
-    for cid, price in db.execute(select(Product.catalog_item_id, Product.price).where(
-            Product.is_active.is_(True), Product.catalog_item_id.is_not(None))):
-        out.setdefault(cid, []).append(price)
-    return out
-
-
 @router.post("/catalog/add")
 def add_from_catalog(body: CatalogAddIn, shop: OwnerShop, user: OwnerUser, db: DB):
-    added, reactivated = 0, 0
-    for item in body.items:
-        c = db.get(CatalogItem, item.catalog_item_id)
-        if c is None:
-            raise NotFound("Catalog item not found")
-        existing = db.scalar(select(Product).where(Product.shop_id == shop.id, Product.catalog_item_id == c.id))
-        if existing:
-            if existing.is_active:
-                continue
-            existing.is_active = True
-            existing.price = item.price
-            set_stock(db, existing, item.quantity, user.id)
-            reactivated += 1
+    wanted = {i.catalog_item_id: i for i in body.items}
+    catalog, existing = db.gather(
+        lambda: db.catalog_items.by_ids(wanted),
+        lambda: {p.catalog_item_id: p for p in db.products.find(
+            {"shop_id": shop.id, "catalog_item_id": {"$in": list(wanted)}})},
+    )
+    if len(catalog) != len(wanted):
+        raise NotFound("Catalog item not found")
+    cats = categories(db)
+    creates, updates = [], []
+    for cid, item in wanted.items():
+        c = catalog[cid]
+        if cid in existing:
+            if not existing[cid].is_active:  # previously removed: bring it back with the new price and count
+                updates.append((existing[cid], {"is_active": True, "price": item.price}, item.quantity))
             continue
-        p = Product(shop_id=shop.id, catalog_item_id=c.id, category_id=c.category_id, name=c.name, brand=c.brand,
-                    unit=c.unit, description=c.description, specs=c.specs or {},
-                    keywords=_keywords(c.tags or [], c.category, c.subcategory), icon=c.icon, price=item.price,
-                    mrp=c.mrp, quantity=0)
-        db.add(p)
-        db.flush()
-        if item.quantity:
-            change_stock(db, p, item.quantity, InventoryReason.INITIAL, user.id)
-        added += 1
-    db.commit()
-    index.mark_dirty()
-    return {"added": added, "reactivated": reactivated}
+        creates.append((Product(shop_id=shop.id, catalog_item_id=c.id, category_id=c.category_id, name=c.name,
+                                brand=c.brand, unit=c.unit, description=c.description, specs=c.specs or {},
+                                keywords=_keywords(c.tags or [], cats[c.category_id], c.subcategory), icon=c.icon,
+                                price=item.price, mrp=c.mrp, quantity=0), item.quantity))
+    apply_bulk(db, shop, user.id, creates, updates)
+    _listings_changed()
+    return {"added": len(creates), "reactivated": len(updates)}
 
 
 # ------------------------------------------------------------------ reservations & orders
 
-def _events(db, entity, entity_id):
-    return db.scalars(select(StatusEvent).where(StatusEvent.entity == entity, StatusEvent.entity_id == entity_id)
-                      .order_by(StatusEvent.created_at, StatusEvent.id)).all()
+def _res(db: Database, rows: list[Reservation], with_events: bool = False) -> list[dict]:
+    hydrate_reservations(db, rows, customers=True)
+    events = timelines(db, "reservation", [r.id for r in rows]) if with_events else {}
+    return [reservation_out(r, actions=reservation_service.allowed_actions(r, "owner"), for_owner=True,
+                            events=events.get(r.id) if with_events else None) for r in rows]
 
 
-def _res(db, r: Reservation, with_events: bool = False) -> dict:
-    return reservation_out(r, actions=reservation_service.allowed_actions(r, "owner"), for_owner=True,
-                           events=_events(db, "reservation", r.id) if with_events else None)
+def _ord(db: Database, rows: list[Order], with_events: bool = False) -> list[dict]:
+    hydrate_orders(db, rows, customers=True)
+    events = timelines(db, "order", [o.id for o in rows]) if with_events else {}
+    return [order_out(o, actions=order_service.allowed_actions(o, "owner"), for_owner=True,
+                      events=events.get(o.id) if with_events else None) for o in rows]
 
 
-def _ord(db, o: Order, with_events: bool = False) -> dict:
-    return order_out(o, actions=order_service.allowed_actions(o, "owner"), for_owner=True,
-                     events=_events(db, "order", o.id) if with_events else None)
+def _shop_reservation(db: Database, shop: Shop, reservation_id: int) -> Reservation:
+    r = db.reservations.get(reservation_id)
+    if r is None or r.shop_id != shop.id:
+        raise NotFound("Reservation not found")
+    return r
+
+
+def _shop_order(db: Database, shop: Shop, order_id: int) -> Order:
+    o = db.orders.get(order_id)
+    if o is None or o.shop_id != shop.id:
+        raise NotFound("Order not found")
+    return o
 
 
 @router.get("/reservations")
 def shop_reservations(shop: OwnerShop, db: DB, scope: Literal["active", "history"] = "active"):
     reservation_service.expire_due(db)
-    stmt = select(Reservation).where(Reservation.shop_id == shop.id)
     if scope == "active":
-        stmt = stmt.where(Reservation.status.in_(reservation_service.ACTIVE)).order_by(Reservation.created_at)
+        rows = db.reservations.find({"shop_id": shop.id, "status": {"$in": RES_ACTIVE}}, sort=[("created_at", 1)])
     else:
-        stmt = stmt.where(Reservation.status.not_in(reservation_service.ACTIVE)) \
-            .order_by(Reservation.updated_at.desc()).limit(100)
-    return [_res(db, r) for r in db.scalars(stmt)]
+        rows = db.reservations.find({"shop_id": shop.id, "status": {"$nin": RES_ACTIVE}},
+                                    sort=[("updated_at", -1)], limit=100)
+    return _res(db, rows)
 
 
 @router.get("/reservations/{reservation_id}")
 def shop_reservation(reservation_id: int, shop: OwnerShop, db: DB):
-    r = db.get(Reservation, reservation_id)
-    if r is None or r.shop_id != shop.id:
-        raise NotFound("Reservation not found")
-    return _res(db, r, with_events=True)
+    return _res(db, [_shop_reservation(db, shop, reservation_id)], with_events=True)[0]
 
 
 @router.post("/reservations/{reservation_id}/{action}")
 def act_on_reservation(reservation_id: int, action: Literal["confirm", "reject", "ready", "complete", "cancel"],
                        body: TransitionIn, shop: OwnerShop, user: OwnerUser, db: DB):
-    r = db.get(Reservation, reservation_id)
-    if r is None or r.shop_id != shop.id:
-        raise NotFound("Reservation not found")
-    r = reservation_service.transition(db, r, action, user, body.reason)
-    return _res(db, r, with_events=True)
+    r = _shop_reservation(db, shop, reservation_id)
+    r = reservation_service.transition(db, r.id, action, user, body.reason)
+    return _res(db, [r], with_events=True)[0]
 
 
 @router.get("/orders")
 def shop_orders(shop: OwnerShop, db: DB, scope: Literal["active", "history"] = "active"):
-    stmt = select(Order).options(selectinload(Order.items)).where(Order.shop_id == shop.id)
     if scope == "active":
-        stmt = stmt.where(Order.status.in_(order_service.ACTIVE | {"DELIVERY_FAILED"})).order_by(Order.created_at)
+        rows = db.orders.find({"shop_id": shop.id, "status": {"$in": ORDER_OPEN}}, sort=[("created_at", 1)])
     else:
-        stmt = stmt.where(Order.status.not_in(order_service.ACTIVE | {"DELIVERY_FAILED"})) \
-            .order_by(Order.updated_at.desc()).limit(100)
-    return [_ord(db, o) for o in db.scalars(stmt)]
+        rows = db.orders.find({"shop_id": shop.id, "status": {"$nin": ORDER_OPEN}},
+                              sort=[("updated_at", -1)], limit=100)
+    return _ord(db, rows)
 
 
 @router.get("/orders/{order_id}")
 def shop_order(order_id: int, shop: OwnerShop, db: DB):
-    o = db.get(Order, order_id)
-    if o is None or o.shop_id != shop.id:
-        raise NotFound("Order not found")
-    return _ord(db, o, with_events=True)
+    return _ord(db, [_shop_order(db, shop, order_id)], with_events=True)[0]
 
 
 @router.post("/orders/{order_id}/{action}")
 def act_on_order(order_id: int, action: Literal["confirm", "prepare", "dispatch", "deliver", "fail", "return",
                                                  "cancel"],
                  body: TransitionIn, shop: OwnerShop, user: OwnerUser, db: DB):
-    o = db.get(Order, order_id)
-    if o is None or o.shop_id != shop.id:
-        raise NotFound("Order not found")
-    o = order_service.transition(db, o, action, user, body.reason)
-    return _ord(db, o, with_events=True)
+    o = _shop_order(db, shop, order_id)
+    o = order_service.transition(db, o.id, action, user, body.reason)
+    return _ord(db, [o], with_events=True)[0]
 
 
 # ------------------------------------------------------------------ bulk import (Excel / CSV)
@@ -397,5 +403,5 @@ async def import_preview(shop: OwnerShop, db: DB, file: UploadFile = File(...)):
 @router.post("/import/commit")
 def import_commit(body: ImportCommitIn, shop: OwnerShop, user: OwnerUser, db: DB):
     result = importer.commit(db, shop, [r.model_dump() for r in body.rows], user.id)
-    index.mark_dirty()
+    _listings_changed()
     return result

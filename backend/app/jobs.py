@@ -3,7 +3,7 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from app.core.database import SessionLocal
+from app.core.database import Database
 from app.services.orders import cancel_stale_pending
 from app.services.reservations import expire_due
 
@@ -11,11 +11,11 @@ log = logging.getLogger(__name__)
 
 
 def sweep_expired() -> None:
-    with SessionLocal() as db:
-        n = expire_due(db)
-        m = cancel_stale_pending(db)
-        if n or m:
-            log.info("expired %d reservations, auto-cancelled %d stale orders", n, m)
+    db = Database()
+    n = expire_due(db)
+    m = cancel_stale_pending(db)
+    if n or m:
+        log.info("expired %d reservations, auto-cancelled %d stale orders", n, m)
 
 
 def start_scheduler() -> BackgroundScheduler:

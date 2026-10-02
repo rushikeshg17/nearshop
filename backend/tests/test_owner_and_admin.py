@@ -1,14 +1,12 @@
-from app.core.database import SessionLocal
-from app.models import InventoryEvent
+from app.core.database import Database
 from tests.conftest import CENTER, HEADERS
 
 
 def test_owner_updates_stock_and_it_is_audited(owner_a, ids):
     res = owner_a.put(f"/api/owner/products/{ids['charger']}/stock", json={"quantity": 9}, headers=HEADERS).json()
     assert res["quantity"] == 9 and res["stock_status"] == "in_stock"
-    with SessionLocal() as db:
-        last = db.query(InventoryEvent).filter_by(product_id=ids["charger"]).order_by(InventoryEvent.id.desc()).first()
-        assert last.quantity_after == 9
+    last = Database().inventory_events.find_one({"product_id": ids["charger"]}, sort=[("_id", -1)])
+    assert last.quantity_after == 9
 
 
 def test_out_of_stock_items_still_appear_marked(owner_a, client, ids):
@@ -76,11 +74,8 @@ def test_import_preview_matches_and_commit_applies(owner_a, ids):
     done = owner_a.post("/api/owner/import/commit", json={"rows": list(rows.values())}, headers=HEADERS)
     assert done.status_code == 200, done.text
     assert done.json() == {"updated": 2, "added": 1, "skipped": 0}
-    with SessionLocal() as db:
-        from app.models import Product
-
-        p = db.get(Product, ids["charger"])
-        assert p.quantity == 8 and p.price == 1199
+    p = Database().products.get(ids["charger"])
+    assert p.quantity == 8 and p.price == 1199
 
 
 def test_import_rejects_non_spreadsheets(owner_a):

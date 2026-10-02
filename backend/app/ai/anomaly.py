@@ -15,20 +15,19 @@ from collections import defaultdict
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
-from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
 
+from app.core.database import Database
 from app.models import AnomalyStatus, ModelRun, PriceAnomaly, Product
+from app.services.loaders import with_catalog_items
 
 MIN_PEERS = 4
 MIN_DEVIATION = 0.18  # at least 18% from the local median to be worth a human look
 
 
-def detect(db: Session) -> ModelRun:
+def detect(db: Database) -> ModelRun:
     started = time.time()
-    listings = db.scalars(
-        select(Product).where(Product.is_active.is_(True), Product.catalog_item_id.is_not(None))
-    ).all()
+    listings = with_catalog_items(db, db.products.find({"is_active": True, "catalog_item_id": {"$ne": None}},
+                                                       projection={"description": 0, "specs": 0}))
     groups: dict[int, list[Product]] = defaultdict(list)
     for p in listings:
         groups[p.catalog_item_id].append(p)
@@ -50,8 +49,7 @@ def detect(db: Session) -> ModelRun:
         run.n_samples = len(feats)
         run.metrics = {"listings_checked": len(feats), "flagged": 0}
         run.data_note = "Not enough shops selling the same items to compare prices yet."
-        db.add(run)
-        db.commit()
+        db.model_runs.insert(run)
         return run
 
     X = np.array(feats)
@@ -59,21 +57,18 @@ def detect(db: Session) -> ModelRun:
     scores = -forest.score_samples(X)  # higher = more isolated = more unusual
     preds = forest.predict(X)
 
-    db.add(run)
-    db.flush()
+    run.id = db.next_id("model_runs")
     # Replace previous open flags; keep reviewed/dismissed decisions for audit.
-    db.execute(delete(PriceAnomaly).where(PriceAnomaly.status == AnomalyStatus.OPEN))
     dismissed = {
-        (a.product_id, round(a.price, 2))
-        for a in db.scalars(select(PriceAnomaly).where(PriceAnomaly.status != AnomalyStatus.OPEN))
+        (a["product_id"], round(a["price"], 2))
+        for a in db.price_anomalies.find_raw({"status": {"$ne": AnomalyStatus.OPEN}}, {"product_id": 1, "price": 1})
     }
-    flagged = 0
+    flags = []
     for (p, median, peers), score, pred in zip(meta, scores, preds):
         deviation = (p.price - median) / median
         if pred != -1 or abs(deviation) < MIN_DEVIATION or (p.id, round(p.price, 2)) in dismissed:
             continue
-        flagged += 1
-        db.add(
+        flags.append(
             PriceAnomaly(
                 product_id=p.id,
                 shop_id=p.shop_id,
@@ -87,6 +82,7 @@ def detect(db: Session) -> ModelRun:
                 model_run_id=run.id,
             )
         )
+    flagged = len(flags)
     run.n_samples = len(X)
     run.metrics = {
         "listings_checked": len(X),
@@ -97,5 +93,11 @@ def detect(db: Session) -> ModelRun:
     }
     run.data_note = "Compares each listing with other shops selling the same item (seeded demo prices)."
     run.duration_ms = int((time.time() - started) * 1000)
-    db.commit()
+
+    def publish() -> None:
+        db.price_anomalies.delete_many({"status": AnomalyStatus.OPEN})
+        db.price_anomalies.insert_many(flags)
+        db.model_runs.insert(run)
+
+    db.transaction(publish)
     return run

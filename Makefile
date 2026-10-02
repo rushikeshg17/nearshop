@@ -1,8 +1,11 @@
-.PHONY: setup seed api web test retrain lint
+.PHONY: setup schema seed api web test retrain lint
 
 setup:
 	cd backend && uv sync && ( [ -f .env ] || cp .env.example .env )
 	cd frontend && npm install
+
+schema:
+	cd backend && uv run python -m database.schema
 
 seed:
 	cd backend && uv run python -m database.seed.seed

@@ -2,22 +2,21 @@
 import logging
 import time
 
-from sqlalchemy.orm import Session
-
 from app.ai import anomaly, demand, recommend, word2vec_ref
 from app.ai.semantic_index import index
+from app.core.database import Database
 from app.models import ModelRun
 
 log = logging.getLogger(__name__)
 
 
-def train_all(db: Session) -> dict:
+def train_all(db: Database) -> dict:
     out: dict = {}
 
     t = time.time()
     index.mark_dirty()
     index.ensure(db)
-    db.add(
+    db.model_runs.insert(
         ModelRun(
             name="embeddings",
             algorithm=index.provider_name,
@@ -27,14 +26,12 @@ def train_all(db: Session) -> dict:
             duration_ms=int((time.time() - t) * 1000),
         )
     )
-    db.commit()
     out["embeddings"] = {"provider": index.provider_name, "listings": len(index.product_ids)}
 
     stats = word2vec_ref.train(db)
-    db.add(ModelRun(name="word2vec", algorithm="Word2Vec skip-gram (gensim)", n_samples=stats["sentences"],
+    db.model_runs.insert(ModelRun(name="word2vec", algorithm="Word2Vec skip-gram (gensim)", n_samples=stats["sentences"],
                     metrics=stats, data_note="Academic reference model trained on the product corpus.",
                     duration_ms=stats["duration_ms"]))
-    db.commit()
     out["word2vec"] = stats
 
     for name, fn in (("demand", demand.train_and_forecast), ("recommendations", recommend.train),
@@ -46,8 +43,5 @@ def train_all(db: Session) -> dict:
 
 
 if __name__ == "__main__":
-    from app.core.database import SessionLocal
-
     logging.basicConfig(level=logging.INFO)
-    with SessionLocal() as session:
-        print(train_all(session))
+    print(train_all(Database()))

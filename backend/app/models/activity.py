@@ -1,260 +1,226 @@
 """Reservations, delivery orders, reviews, notifications, search history and AI outputs."""
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    CheckConstraint,
-    DateTime,
-    Float,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    Text,
-)
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pydantic import Field, model_validator
 
-from app.core.database import Base, utcnow
-from app.models.core import Product, Shop, TimestampMixin, User, str_enum
+from app.core.database import utcnow
+from app.models.base import Document, Embedded, GeoPoint, Timestamps
+from app.models.core import Product, Shop, User
 from app.models.enums import AnomalyStatus, OrderStatus, ReservationStatus, SaleSource
 
 
-class Reservation(TimestampMixin, Base):
-    __tablename__ = "reservations"
-    __table_args__ = (
-        CheckConstraint("quantity > 0", name="ck_reservation_qty"),
-        Index("ix_reservations_shop_status", "shop_id", "status"),
-        Index("ix_reservations_customer_status", "customer_id", "status"),
-    )
+class Reservation(Document, Timestamps):
+    """Collection `reservations`. Unique on code."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    code: Mapped[str] = mapped_column(String(12), unique=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id"), index=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
-    quantity: Mapped[int] = mapped_column(Integer)
-    unit_price: Mapped[float] = mapped_column(Float)
-    status: Mapped[ReservationStatus] = mapped_column(str_enum(ReservationStatus), default=ReservationStatus.REQUESTED)
-    note: Mapped[str | None] = mapped_column(String(300))
-    hold_minutes: Mapped[int] = mapped_column(Integer, default=30)
-    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-    stock_held: Mapped[bool] = mapped_column(Boolean, default=False)
-    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
-    ready_at: Mapped[datetime | None] = mapped_column(DateTime)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
-    close_reason: Mapped[str | None] = mapped_column(String(300))
+    code: str
+    customer_id: int
+    shop_id: int
+    product_id: int
+    quantity: int
+    unit_price: float
+    status: ReservationStatus = ReservationStatus.REQUESTED
+    note: str | None = None
+    hold_minutes: int = 30
+    expires_at: datetime
+    stock_held: bool = False
+    confirmed_at: datetime | None = None
+    ready_at: datetime | None = None
+    completed_at: datetime | None = None
+    closed_at: datetime | None = None
+    close_reason: str | None = None
 
-    customer: Mapped[User] = relationship()
-    shop: Mapped[Shop] = relationship()
-    product: Mapped[Product] = relationship()
+    customer: User | None = Field(default=None, exclude=True)
+    shop: Shop | None = Field(default=None, exclude=True)
+    product: Product | None = Field(default=None, exclude=True)
 
     @property
     def total(self) -> float:
         return round(self.unit_price * self.quantity, 2)
 
 
-class Order(TimestampMixin, Base):
-    """Shop-managed delivery order (cash on delivery in V1; payment_method keeps it modular)."""
+class OrderItem(Embedded):
+    """Line item embedded in its order. `name` and `unit_price` are snapshots taken at order time."""
 
-    __tablename__ = "orders"
-    __table_args__ = (Index("ix_orders_shop_status", "shop_id", "status"),)
+    product_id: int
+    name: str
+    unit_price: float
+    quantity: int
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    code: Mapped[str] = mapped_column(String(12), unique=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id"), index=True)
-    status: Mapped[OrderStatus] = mapped_column(str_enum(OrderStatus), default=OrderStatus.PENDING)
-    payment_method: Mapped[str] = mapped_column(String(20), default="cod")
-    payment_status: Mapped[str] = mapped_column(String(20), default="unpaid")
-    delivery_address: Mapped[str] = mapped_column(String(300))
-    delivery_lat: Mapped[float] = mapped_column(Float)
-    delivery_lng: Mapped[float] = mapped_column(Float)
-    contact_phone: Mapped[str] = mapped_column(String(20))
-    distance_km: Mapped[float] = mapped_column(Float)
-    subtotal: Mapped[float] = mapped_column(Float)
-    delivery_fee: Mapped[float] = mapped_column(Float)
-    total: Mapped[float] = mapped_column(Float)
-    note: Mapped[str | None] = mapped_column(String(300))
-    stock_held: Mapped[bool] = mapped_column(Boolean, default=False)
-    delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
-    close_reason: Mapped[str | None] = mapped_column(String(300))
-
-    customer: Mapped[User] = relationship()
-    shop: Mapped[Shop] = relationship()
-    items: Mapped[list["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    product: Product | None = Field(default=None, exclude=True)
 
 
-class OrderItem(Base):
-    __tablename__ = "order_items"
-    __table_args__ = (CheckConstraint("quantity > 0", name="ck_order_item_qty"),)
+class Order(Document, Timestamps):
+    """Collection `orders`. Shop-managed delivery order with its line items embedded, so an order
+    is read and written as one document (cash on delivery in V1; payment_method keeps it modular)."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), index=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
-    name: Mapped[str] = mapped_column(String(200))  # snapshot at order time
-    unit_price: Mapped[float] = mapped_column(Float)
-    quantity: Mapped[int] = mapped_column(Integer)
+    code: str
+    customer_id: int
+    shop_id: int
+    status: OrderStatus = OrderStatus.PENDING
+    payment_method: str = "cod"
+    payment_status: str = "unpaid"
+    delivery_address: str
+    delivery_lat: float
+    delivery_lng: float
+    contact_phone: str
+    distance_km: float
+    subtotal: float
+    delivery_fee: float
+    total: float
+    note: str | None = None
+    stock_held: bool = False
+    delivered_at: datetime | None = None
+    closed_at: datetime | None = None
+    close_reason: str | None = None
+    items: list[OrderItem] = Field(default_factory=list)
 
-    order: Mapped[Order] = relationship(back_populates="items")
-    product: Mapped[Product] = relationship()
-
-
-class StatusEvent(Base):
-    """Every state-machine transition, used for timelines and reliability stats."""
-
-    __tablename__ = "status_events"
-    __table_args__ = (Index("ix_status_events_entity", "entity", "entity_id"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    entity: Mapped[str] = mapped_column(String(20))  # reservation | order
-    entity_id: Mapped[int] = mapped_column(Integer)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id"), index=True)
-    from_status: Mapped[str | None] = mapped_column(String(24))
-    to_status: Mapped[str] = mapped_column(String(24))
-    actor_role: Mapped[str] = mapped_column(String(16))  # customer | owner | admin | system
-    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    note: Mapped[str | None] = mapped_column(String(300))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    customer: User | None = Field(default=None, exclude=True)
+    shop: Shop | None = Field(default=None, exclude=True)
 
 
-class Review(Base):
-    __tablename__ = "reviews"
-    __table_args__ = (
-        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_review_rating"),
-        CheckConstraint("accuracy_rating IS NULL OR accuracy_rating BETWEEN 1 AND 5", name="ck_review_accuracy"),
-        CheckConstraint("delivery_rating IS NULL OR delivery_rating BETWEEN 1 AND 5", name="ck_review_delivery"),
-        CheckConstraint("(reservation_id IS NOT NULL) <> (order_id IS NOT NULL)", name="ck_review_source"),
-    )
+class StatusEvent(Document):
+    """Collection `status_events`. Every state-machine transition; used for timelines and reliability stats."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id"), index=True)
-    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), index=True)
-    # Unique: one review per completed reservation / delivered order.
-    reservation_id: Mapped[int | None] = mapped_column(ForeignKey("reservations.id"), unique=True)
-    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), unique=True)
-    rating: Mapped[int] = mapped_column(Integer)
-    accuracy_rating: Mapped[int | None] = mapped_column(Integer)
-    delivery_rating: Mapped[int | None] = mapped_column(Integer)
-    comment: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-
-    customer: Mapped[User] = relationship()
+    entity: str  # reservation | order
+    entity_id: int
+    shop_id: int
+    from_status: str | None = None
+    to_status: str
+    actor_role: str  # customer | owner | admin | system
+    actor_id: int | None = None
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
 
 
-class Notification(Base):
-    __tablename__ = "notifications"
-    __table_args__ = (Index("ix_notifications_user_read", "user_id", "read_at"),)
+class Review(Document):
+    """Collection `reviews`. Exactly one of reservation_id / order_id is set, and each is unique:
+    one review per completed reservation or delivered order."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(40))
-    title: Mapped[str] = mapped_column(String(160))
-    body: Mapped[str | None] = mapped_column(String(400))
-    link: Mapped[str | None] = mapped_column(String(255))
-    read_at: Mapped[datetime | None] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    customer_id: int
+    shop_id: int
+    product_id: int | None = None
+    reservation_id: int | None = None
+    order_id: int | None = None
+    rating: int
+    accuracy_rating: int | None = None
+    delivery_rating: int | None = None
+    comment: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
 
-
-class SearchEvent(Base):
-    __tablename__ = "search_history"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
-    query: Mapped[str] = mapped_column(String(200))
-    normalized_query: Mapped[str] = mapped_column(String(200), index=True)
-    category_slug: Mapped[str | None] = mapped_column(String(60))
-    results_count: Mapped[int] = mapped_column(Integer, default=0)
-    lat: Mapped[float | None] = mapped_column(Float)
-    lng: Mapped[float | None] = mapped_column(Float)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    customer: User | None = Field(default=None, exclude=True)
 
 
-class SalesRecord(Base):
-    """Completed sales. Real ones come from reservations/orders; demo rows are clearly flagged."""
+class Notification(Document):
+    """Collection `notifications`."""
 
-    __tablename__ = "sales_history"
-    __table_args__ = (Index("ix_sales_product_date", "product_id", "sold_at"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"))
-    catalog_item_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_items.id"), index=True)
-    customer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    basket_id: Mapped[str] = mapped_column(String(40), index=True)
-    quantity: Mapped[int] = mapped_column(Integer)
-    unit_price: Mapped[float] = mapped_column(Float)
-    source: Mapped[SaleSource] = mapped_column(str_enum(SaleSource, 16))
-    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    sold_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    user_id: int
+    kind: str
+    title: str
+    body: str | None = None
+    link: str | None = None
+    read_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
 
 
-class ModelRun(Base):
-    __tablename__ = "model_runs"
+class SearchEvent(Document):
+    """Collection `search_history`. `location` (rounded to ~100 m) lets a shop see what people
+    nearby are searching for with a geo query."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(60), index=True)  # demand | recommendations | anomalies | embeddings
-    algorithm: Mapped[str] = mapped_column(String(80))
-    n_samples: Mapped[int] = mapped_column(Integer, default=0)
-    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
-    data_note: Mapped[str | None] = mapped_column(String(300))
-    uses_demo_data: Mapped[bool] = mapped_column(Boolean, default=False)
-    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    user_id: int | None = None
+    query: str
+    normalized_query: str
+    category_slug: str | None = None
+    results_count: int = 0
+    location: GeoPoint | None = None
+    created_at: datetime = Field(default_factory=utcnow)
 
-
-class AssociationRule(Base):
-    """Apriori market-basket rule over catalog items: antecedents -> consequents."""
-
-    __tablename__ = "recommendations"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    antecedents: Mapped[list] = mapped_column(JSON)  # list[catalog_item_id]
-    consequents: Mapped[list] = mapped_column(JSON)
-    antecedent_key: Mapped[str] = mapped_column(String(120), index=True)  # sorted ids joined by ","
-    support: Mapped[float] = mapped_column(Float)
-    confidence: Mapped[float] = mapped_column(Float)
-    lift: Mapped[float] = mapped_column(Float)
-    model_run_id: Mapped[int] = mapped_column(ForeignKey("model_runs.id", ondelete="CASCADE"))
+    @model_validator(mode="before")
+    @classmethod
+    def _lat_lng_to_location(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "location" not in data and data.get("lat") is not None \
+                and data.get("lng") is not None:
+            data = dict(data)
+            data["location"] = GeoPoint.of(data.pop("lat"), data.pop("lng"))
+        return data
 
 
-class DemandForecast(Base):
-    __tablename__ = "demand_forecasts"
+class SalesRecord(Document):
+    """Collection `sales_history`. Completed sales. Real ones come from reservations/orders;
+    demo rows are clearly flagged."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), unique=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
-    predicted_7d: Mapped[float] = mapped_column(Float)
-    daily_rate: Mapped[float] = mapped_column(Float)
-    days_to_stockout: Mapped[float | None] = mapped_column(Float)
-    recommended_restock: Mapped[int] = mapped_column(Integer, default=0)
-    trend: Mapped[str] = mapped_column(String(12), default="steady")  # rising | steady | falling
-    confidence: Mapped[str] = mapped_column(String(12), default="low")
-    history_days: Mapped[int] = mapped_column(Integer, default=0)
-    is_demo: Mapped[bool] = mapped_column(Boolean, default=True)
-    model_run_id: Mapped[int] = mapped_column(ForeignKey("model_runs.id", ondelete="CASCADE"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    shop_id: int
+    product_id: int
+    catalog_item_id: int | None = None
+    category_id: int | None = None  # denormalised from the product: category revenue without a join
+    customer_id: int | None = None
+    basket_id: str
+    quantity: int
+    unit_price: float
+    source: SaleSource
+    is_demo: bool = False
+    sold_at: datetime = Field(default_factory=utcnow)
 
 
-class PriceAnomaly(Base):
-    __tablename__ = "price_anomalies"
+class ModelRun(Document):
+    """Collection `model_runs`. One row per training run of an AI component."""
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
-    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), index=True)
-    catalog_item_id: Mapped[int] = mapped_column(ForeignKey("catalog_items.id"), index=True)
-    price: Mapped[float] = mapped_column(Float)
-    reference_price: Mapped[float] = mapped_column(Float)  # local median
-    deviation_pct: Mapped[float] = mapped_column(Float)
-    score: Mapped[float] = mapped_column(Float)  # isolation forest anomaly score (higher = more unusual)
-    direction: Mapped[str] = mapped_column(String(8))  # high | low
-    peer_count: Mapped[int] = mapped_column(Integer)
-    status: Mapped[AnomalyStatus] = mapped_column(str_enum(AnomalyStatus, 12), default=AnomalyStatus.OPEN, index=True)
-    review_note: Mapped[str | None] = mapped_column(String(300))
-    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
-    model_run_id: Mapped[int] = mapped_column(ForeignKey("model_runs.id", ondelete="CASCADE"))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    name: str  # demand | recommendations | anomalies | embeddings | word2vec
+    algorithm: str
+    n_samples: int = 0
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    data_note: str | None = None
+    uses_demo_data: bool = False
+    duration_ms: int = 0
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class AssociationRule(Document):
+    """Collection `recommendations`. Apriori market-basket rule over catalog items: antecedents -> consequents."""
+
+    antecedents: list[int]
+    consequents: list[int]
+    antecedent_key: str  # sorted ids joined by ","
+    support: float
+    confidence: float
+    lift: float
+    model_run_id: int
+
+
+class DemandForecast(Document):
+    """Collection `demand_forecasts`. One per product (unique on product_id)."""
+
+    product_id: int
+    shop_id: int
+    predicted_7d: float
+    daily_rate: float
+    days_to_stockout: float | None = None
+    recommended_restock: int = 0
+    trend: str = "steady"  # rising | steady | falling
+    confidence: str = "low"
+    history_days: int = 0
+    is_demo: bool = True
+    model_run_id: int
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class PriceAnomaly(Document):
+    """Collection `price_anomalies`. Review queue for an admin; never an automatic penalty."""
+
+    product_id: int
+    shop_id: int
+    catalog_item_id: int
+    price: float
+    reference_price: float  # local median
+    deviation_pct: float
+    score: float  # isolation forest anomaly score (higher = more unusual)
+    direction: str  # high | low
+    peer_count: int
+    status: AnomalyStatus = AnomalyStatus.OPEN
+    review_note: str | None = None
+    reviewed_by: int | None = None
+    reviewed_at: datetime | None = None
+    model_run_id: int
+    created_at: datetime = Field(default_factory=utcnow)

@@ -11,20 +11,18 @@ import time
 
 from gensim.models import Word2Vec
 from gensim.utils import simple_preprocess
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models import CatalogItem, Product
+from app.core.database import Database
 
 MODEL_PATH = settings.model_dir / "word2vec.model"
 _model: Word2Vec | None = None
 _lock = threading.Lock()
 
 
-def _corpus(db: Session) -> list[list[str]]:
+def _corpus(db: Database) -> list[list[str]]:
     sentences: list[list[str]] = []
-    for c in db.scalars(select(CatalogItem)):
+    for c in db.catalog_items.find():
         base = simple_preprocess(f"{c.name} {c.brand or ''} {c.subcategory or ''}")
         tags = [simple_preprocess(t) for t in (c.tags or [])]
         sentences.append(base + [w for t in tags for w in t])
@@ -32,12 +30,12 @@ def _corpus(db: Session) -> list[list[str]]:
             sentences.append(t + base[:4])
         if c.description:
             sentences.append(simple_preprocess(c.description))
-    for name, kw in db.execute(select(Product.name, Product.keywords).where(Product.catalog_item_id.is_(None))):
-        sentences.append(simple_preprocess(f"{name} {kw}"))
+    for p in db.products.find_raw({"catalog_item_id": None}, {"name": 1, "keywords": 1}):
+        sentences.append(simple_preprocess(f"{p['name']} {p.get('keywords') or ''}"))
     return [s for s in sentences if len(s) > 1]
 
 
-def train(db: Session) -> dict:
+def train(db: Database) -> dict:
     global _model
     started = time.time()
     sentences = _corpus(db)

@@ -21,8 +21,8 @@ const PRESETS = ["phone charging adapter", "bathroom tap leaking", "chappal", "r
 
 const PIPELINE = [
   { icon: Search, t: "Understand", d: "Normalise the query, fix spelling, add local synonyms (chappal, nali, adaptor)." },
-  { icon: Sparkles, t: "Match", d: "Sentence embeddings for meaning plus SQLite FTS5 (BM25) for exact words." },
-  { icon: MapPin, t: "Locate", d: "Bounding box in SQL, then exact Haversine distance to every shop." },
+  { icon: Sparkles, t: "Match", d: "Sentence embeddings for meaning plus a MongoDB text index for exact words." },
+  { icon: MapPin, t: "Locate", d: "MongoDB geo index finds shops in range, then exact Haversine distance to each." },
   { icon: Filter, t: "Filter", d: "Stock, price range, pickup or delivery eligibility." },
   { icon: SplitSquareHorizontal, t: "Rank and group", d: "75% relevance, 15% proximity, 10% availability. Same item across shops is grouped." },
 ];

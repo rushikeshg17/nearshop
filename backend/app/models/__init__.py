@@ -12,15 +12,14 @@ from app.models.activity import (
     SearchEvent,
     StatusEvent,
 )
+from app.models.base import GeoPoint
 from app.models.core import (
     CatalogItem,
     Category,
     InventoryEvent,
     Product,
     Shop,
-    TextEmbedding,
     User,
-    shop_categories,
 )
 from app.models.enums import (
     AnomalyStatus,
@@ -37,11 +36,13 @@ __all__ = [
     "CatalogItem",
     "Category",
     "DemandForecast",
+    "GeoPoint",
     "InventoryEvent",
     "InventoryReason",
     "ModelRun",
     "Notification",
     "Order",
+    "OrderItem",
     "OrderItem",
     "OrderStatus",
     "PriceAnomaly",
@@ -55,7 +56,5 @@ __all__ = [
     "SearchEvent",
     "Shop",
     "StatusEvent",
-    "TextEmbedding",
     "User",
-    "shop_categories",
 ]

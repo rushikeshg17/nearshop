@@ -1,12 +1,10 @@
 """Helpers shared by the reservation and delivery-order state machines."""
-from sqlalchemy.orm import Session
-
-from app.core.database import utcnow
+from app.core.database import Database, utcnow
 from app.models import Product, SaleSource, SalesRecord, StatusEvent
 
 
 def record_event(
-    db: Session,
+    db: Database,
     *,
     entity: str,
     entity_id: int,
@@ -17,7 +15,7 @@ def record_event(
     actor_id: int | None,
     note: str | None = None,
 ) -> None:
-    db.add(
+    db.status_events.insert(
         StatusEvent(
             entity=entity,
             entity_id=entity_id,
@@ -31,28 +29,24 @@ def record_event(
     )
 
 
-def record_sale(
-    db: Session,
-    *,
-    product: Product,
-    quantity: int,
-    unit_price: float,
-    source: SaleSource,
-    basket_id: str,
-    customer_id: int | None,
-) -> None:
-    """Completed sales feed demand prediction and market-basket analysis."""
-    db.add(
+def record_sales(db: Database, lines: list[tuple[Product, int, float]], *, source: SaleSource, basket_id: str,
+                 customer_id: int | None) -> None:
+    """Completed sales feed demand prediction and market-basket analysis.
+    `lines` is (product, quantity, unit_price) for everything bought together."""
+    now = utcnow()
+    db.sales_history.insert_many([
         SalesRecord(
             shop_id=product.shop_id,
             product_id=product.id,
             catalog_item_id=product.catalog_item_id,
+            category_id=product.category_id,
             customer_id=customer_id,
             basket_id=basket_id,
             quantity=quantity,
             unit_price=unit_price,
             source=source,
             is_demo=False,
-            sold_at=utcnow(),
+            sold_at=now,
         )
-    )
+        for product, quantity, unit_price in lines
+    ])

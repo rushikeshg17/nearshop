@@ -10,7 +10,7 @@ NearShop = Discover + Compare + Verify availability + Reserve + Pickup / Shop de
 
 | Area | What it does |
 |---|---|
-| **Search** | Hybrid search: sentence embeddings (meaning) plus SQLite FTS5 BM25 (keywords), local synonyms, spelling correction, radius filter, stock, price and fulfilment filters. The same item sold by several shops is grouped so customers can compare. |
+| **Search** | Hybrid search: sentence embeddings (meaning) plus a weighted MongoDB text index (keywords), local synonyms, spelling correction, radius filter, stock, price and fulfilment filters. The same item sold by several shops is grouped so customers can compare. |
 | **Map** | OpenStreetMap vector tiles through MapLibre GL, with price pins, a search-radius circle and directions links. |
 | **Pickup reservations** | `REQUESTED -> CONFIRMED -> READY_FOR_PICKUP -> COMPLETED`, with `REJECTED`, `CANCELLED` and `EXPIRED` exits. Stock is held when the shop confirms and released on cancel or expiry. There is a live countdown and a pickup code. |
 | **Shop delivery** | `PENDING -> SHOP_CONFIRMED -> PREPARING -> OUT_FOR_DELIVERY -> DELIVERED`, with `CANCELLED`, `DELIVERY_FAILED` and `RETURNED_TO_SHOP` paths. Each shop sets its own radius, fee and free-delivery threshold. Payment is cash on delivery, with a modular payment field for later. |
@@ -36,12 +36,12 @@ NearShop = Discover + Compare + Verify availability + Reserve + Pickup / Shop de
 
 **Frontend:** Next.js 16 (App Router, React 19, React Compiler), TypeScript, Tailwind CSS 4, shadcn/ui (Radix), Motion, TanStack Query 5, MapLibre GL 6 with OpenFreeMap tiles, Recharts.
 
-**Backend:** Python 3.12, FastAPI, SQLAlchemy 2.1, Pydantic 2, Alembic, SQLite (WAL mode and FTS5), Argon2 password hashing, JWT in an httpOnly cookie, APScheduler.
+**Backend:** Python 3.12, FastAPI, MongoDB (Atlas) through PyMongo, Pydantic 2 document models, multi-document transactions, `$jsonSchema` validation, 2dsphere and text indexes, Argon2 password hashing, JWT in an httpOnly cookie, APScheduler.
 
 **AI/ML:** scikit-learn, pandas, NumPy, fastembed (ONNX Runtime), gensim, mlxtend, rapidfuzz.
 
 ```
-browser ──> Next.js (localhost:3000) ──/api, /media rewrite──> FastAPI (localhost:8000) ──> SQLite
+browser ──> Next.js (localhost:3000) ──/api, /media rewrite──> FastAPI (localhost:8000) ──> MongoDB Atlas
                                                                    │
                                                                    ├── services/   state machines, search, analytics
                                                                    ├── ai/         embeddings, word2vec, demand, apriori, anomalies
@@ -54,11 +54,11 @@ The browser only talks to the Next.js origin. API calls and uploaded images are 
 
 ## Run it locally
 
-Requirements: Node 20.9+, [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 for you).
+Requirements: Node 20.9+, [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 for you), and a MongoDB database: a free [Atlas](https://www.mongodb.com/atlas) cluster works. After `make setup`, put your connection string in `backend/.env` as `NEARSHOP_MONGODB_URI` (that file is gitignored; never commit it) and allow your IP address under Atlas > Network Access.
 
 ```bash
 make setup     # install backend + frontend dependencies
-make seed      # build the database, generate the demo city, train all models (~30 s; first run downloads a 90 MB model)
+make seed      # reset the MongoDB database, generate the demo city, train all models (~3 min on Atlas; first run downloads a 90 MB model)
 make api       # FastAPI on http://localhost:8000  (API docs at /docs)
 make web       # Next.js on http://localhost:3000  (in a second terminal)
 ```
@@ -108,13 +108,13 @@ backend/
   app/
     api/routes/     auth, meta, search, catalog (public pages), customer, owner, admin, ai
     core/           config, database, security, deps (auth + CSRF guard), errors
-    models/         SQLAlchemy models (users, shops, products, reservations, orders, reviews, AI outputs...)
+    models/         Pydantic document models, one per MongoDB collection (users, shops, products, reservations, orders, reviews, AI outputs...)
     schemas/        request validation (Pydantic) and response serializers
     services/       search pipeline, reservation + order state machines, inventory, reliability, analytics
     ai/             embeddings, semantic index, word2vec, demand, recommend, anomaly, pipeline
     jobs.py         background expiry sweep
   database/
-    migrations/     Alembic (initial schema + FTS5 index and triggers)
+    schema.py       MongoDB collections, validation rules and indexes (+ how tables map to documents)
     seed/           seed.py and data/*.json (catalogue, cities, shops, co-purchase baskets)
   tests/            pytest: auth, CSRF, search, state machines, permissions
 frontend/
