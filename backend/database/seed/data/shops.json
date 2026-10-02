@@ -1,0 +1,807 @@
+[
+  {
+    "name": "Sri Lakshmi Hardware & Paints",
+    "categories": [
+      "hardware"
+    ],
+    "tagline": "Tools, locks and fittings since 1994",
+    "description": "Family-run hardware counter stocking Taparia tools, Godrej locks and Asian Paints. Contractors and carpenters from nearby layouts buy here on credit.",
+    "owner_name": "K. Srinivas Rao",
+    "established_year": 1994,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 40,
+    "free_delivery_above": 1000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Kanaka Auto Spares",
+    "categories": [
+      "auto-parts"
+    ],
+    "tagline": "Genuine spares for every two wheeler",
+    "description": "Two-wheeler spares shop next to a row of service garages, known for keeping Hero and Honda parts in stock. Mechanics pick up oil and brake shoes here every morning.",
+    "owner_name": "Mahesh Gowda",
+    "established_year": 2003,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 30,
+    "free_delivery_above": 800,
+    "opening_hours": "9:00 AM - 8:30 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Kaveri Mobiles",
+    "categories": [
+      "mobile-accessories",
+      "electronics"
+    ],
+    "tagline": "Chargers, covers and quick screen guard fitting",
+    "description": "Busy mobile accessories counter that fixes tempered glass while you wait. Also sells earphones, speakers and trimmers.",
+    "owner_name": "Mohammed Irfan",
+    "established_year": 2012,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 25,
+    "free_delivery_above": 500,
+    "opening_hours": "10:00 AM - 9:30 PM",
+    "closed_on": null
+  },
+  {
+    "name": "New Bombay Footwear",
+    "categories": [
+      "footwear"
+    ],
+    "tagline": "Chappals to school shoes under one roof",
+    "description": "Old footwear store with Bata, Paragon and VKC racks for the whole family. Gets crowded in June when schools reopen.",
+    "owner_name": "Abdul Rasheed",
+    "established_year": 1979,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "10:00 AM - 9:00 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Modern Stationers",
+    "categories": [
+      "stationery"
+    ],
+    "tagline": "Notebooks, pens and project material",
+    "description": "Stationery shop opposite a government high school, stocking Classmate books, chart paper and exam supplies. Xerox and lamination done at the counter.",
+    "owner_name": "H. Nagaraj",
+    "established_year": 1988,
+    "offers_delivery": true,
+    "delivery_radius_km": 3,
+    "delivery_fee": 20,
+    "free_delivery_above": 500,
+    "opening_hours": "8:30 AM - 8:30 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Balaji Electricals",
+    "categories": [
+      "electrical"
+    ],
+    "tagline": "Wires, switches and fans at fair rates",
+    "description": "Electrical goods shop supplying Havells, Anchor and Crompton items to homes and local electricians. Fan repair parts always in stock.",
+    "owner_name": "Venkatesh Prasad",
+    "established_year": 1998,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 40,
+    "free_delivery_above": 1500,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Sri Ganesh Plumbing Centre",
+    "categories": [
+      "plumbing"
+    ],
+    "tagline": "Pipes, taps and fittings for every job",
+    "description": "Plumbing store with Astral and Supreme pipes and a full range of fittings. Plumbers can also be arranged for small repair jobs.",
+    "owner_name": "Ganesh Shetty",
+    "established_year": 2005,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 50,
+    "free_delivery_above": 1500,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Vasavi Textiles",
+    "categories": [
+      "clothing"
+    ],
+    "tagline": "Sarees, dhotis and readymades for every occasion",
+    "description": "Textile shop known for cotton sarees, dhotis and blouse materials. Families shop here for festivals and weddings.",
+    "owner_name": "Ravi Kumar Setty",
+    "established_year": 1985,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "10:00 AM - 9:00 PM",
+    "closed_on": "Tuesday"
+  },
+  {
+    "name": "Annapoorna Home Needs",
+    "categories": [
+      "home-supplies"
+    ],
+    "tagline": "Daily cleaning and kitchen essentials",
+    "description": "Neighbourhood home needs store with detergents, cleaners, mops and kitchen items. Regular customers order by phone for doorstep delivery.",
+    "owner_name": "Lakshmi Devi",
+    "established_year": 2009,
+    "offers_delivery": true,
+    "delivery_radius_km": 3,
+    "delivery_fee": 20,
+    "free_delivery_above": 500,
+    "opening_hours": "8:00 AM - 9:30 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Sri Venkateshwara Hardware Mart",
+    "categories": [
+      "hardware",
+      "plumbing"
+    ],
+    "tagline": "Hardware and sanitary under one roof",
+    "description": "Hardware and plumbing store serving building contractors in the new layouts. Stocks fasteners, adhesives, CPVC pipes and bathroom fittings.",
+    "owner_name": "P. Venkataramana",
+    "established_year": 1996,
+    "offers_delivery": true,
+    "delivery_radius_km": 6,
+    "delivery_fee": 50,
+    "free_delivery_above": 1500,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Raghavendra Electricals & Hardware",
+    "categories": [
+      "electrical",
+      "hardware",
+      "plumbing"
+    ],
+    "tagline": "One stop for home repair material",
+    "description": "General repair material store with wiring, plumbing and hardware items. Popular with electricians and plumbers working in the area.",
+    "owner_name": "Raghavendra Bhat",
+    "established_year": 1992,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 40,
+    "free_delivery_above": 1200,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Om Sai Mobile Point",
+    "categories": [
+      "mobile-accessories"
+    ],
+    "tagline": "Original chargers and memory cards",
+    "description": "Compact mobile accessories shop focused on original chargers, cables and memory cards. Staff help pick the right charger for each phone.",
+    "owner_name": "Sai Kiran",
+    "established_year": 2016,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "10:00 AM - 10:00 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Star Electronics",
+    "categories": [
+      "electronics",
+      "mobile-accessories"
+    ],
+    "tagline": "Gadgets, batteries and remotes",
+    "description": "Electronics counter that sells speakers, trimmers, irons, remotes and batteries. Replacement DTH and TV remotes are a speciality.",
+    "owner_name": "Joseph D'Souza",
+    "established_year": 2001,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 30,
+    "free_delivery_above": 800,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Pioneer Auto Parts",
+    "categories": [
+      "auto-parts"
+    ],
+    "tagline": "Car and bike spares, lubricants and bulbs",
+    "description": "Auto parts dealer stocking Castrol, Motul and Bosch products. Also supplies wiper blades and bulbs for cars.",
+    "owner_name": "Suresh Babu",
+    "established_year": 1990,
+    "offers_delivery": true,
+    "delivery_radius_km": 7,
+    "delivery_fee": 50,
+    "free_delivery_above": 1500,
+    "opening_hours": "9:00 AM - 8:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Speedway Two Wheeler Spares",
+    "categories": [
+      "auto-parts"
+    ],
+    "tagline": "Helmets, tyres and riding gear",
+    "description": "Two-wheeler accessories shop with helmets, tubes, tyres and bike covers. Free helmet fitting help for new riders.",
+    "owner_name": "Arjun Naik",
+    "established_year": 2011,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "9:30 AM - 8:30 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Royal Footwear",
+    "categories": [
+      "footwear"
+    ],
+    "tagline": "Branded shoes for work and sport",
+    "description": "Footwear showroom stocking Campus, Sparx, Liberty and Red Chief. Known for formal shoes and sports shoes for students.",
+    "owner_name": "Imran Khan",
+    "established_year": 2007,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 40,
+    "free_delivery_above": 1500,
+    "opening_hours": "10:00 AM - 9:30 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Janatha Footwear Mart",
+    "categories": [
+      "footwear"
+    ],
+    "tagline": "Affordable chappals for the whole family",
+    "description": "Budget footwear shop near the market with Relaxo, Paragon and Walkaroo. Quick turnover of chappals and rain sandals.",
+    "owner_name": "Shivanna",
+    "established_year": 1983,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "9:00 AM - 9:00 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Sri Durga Shoe Palace",
+    "categories": [
+      "footwear"
+    ],
+    "tagline": "School shoes, socks and polish",
+    "description": "Shoe shop that stocks every size of black and white school shoes before the June rush. Also sells socks, polish and gumboots.",
+    "owner_name": "Durgaprasad",
+    "established_year": 1997,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 30,
+    "free_delivery_above": 1000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Sri Krishna Stores",
+    "categories": [
+      "home-supplies",
+      "stationery",
+      "clothing"
+    ],
+    "tagline": "Everything a household needs",
+    "description": "Old general store that sells cleaning supplies, notebooks, innerwear and towels. Many families have bought here for three generations.",
+    "owner_name": "Krishnamurthy",
+    "established_year": 1972,
+    "offers_delivery": true,
+    "delivery_radius_km": 3,
+    "delivery_fee": 20,
+    "free_delivery_above": 600,
+    "opening_hours": "7:30 AM - 9:30 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Saraswathi Book & Stationery Centre",
+    "categories": [
+      "stationery"
+    ],
+    "tagline": "Books, geometry boxes and school bags",
+    "description": "Stationery and school supplies store near a cluster of schools and PU colleges. School lists are packed in advance during reopening season.",
+    "owner_name": "Saraswathi Ramesh",
+    "established_year": 1991,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 25,
+    "free_delivery_above": 700,
+    "opening_hours": "9:00 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Student's Corner",
+    "categories": [
+      "stationery"
+    ],
+    "tagline": "Exam essentials and art supplies",
+    "description": "Small stationery shop run near a degree college, popular for pens, records and exam pads. Keeps colour and craft items for projects.",
+    "owner_name": "Manjunath K",
+    "established_year": 2010,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "8:30 AM - 8:30 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Vidya Stationers & Xerox",
+    "categories": [
+      "stationery"
+    ],
+    "tagline": "Xerox, printouts and stationery",
+    "description": "Stationery and photocopy shop with A4 paper, files and office supplies. Offices in the area buy staplers and paper in bulk here.",
+    "owner_name": "Anand Joshi",
+    "established_year": 2004,
+    "offers_delivery": true,
+    "delivery_radius_km": 3,
+    "delivery_fee": 20,
+    "free_delivery_above": 800,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Shree Mahalakshmi Silks & Readymades",
+    "categories": [
+      "clothing"
+    ],
+    "tagline": "Silk, cotton and festive wear",
+    "description": "Saree and ethnic wear shop with handloom cottons and silk sarees. Festive season brings the biggest crowds.",
+    "owner_name": "Mahalakshmi Narayan",
+    "established_year": 1989,
+    "offers_delivery": true,
+    "delivery_radius_km": 6,
+    "delivery_fee": 50,
+    "free_delivery_above": 1500,
+    "opening_hours": "10:00 AM - 9:00 PM",
+    "closed_on": "Tuesday"
+  },
+  {
+    "name": "Classic Menswear",
+    "categories": [
+      "clothing"
+    ],
+    "tagline": "Shirts, jeans and innerwear for men",
+    "description": "Menswear shop with shirts, jeans, t-shirts and innerwear brands. Alteration service is available on request.",
+    "owner_name": "Prakash Jain",
+    "established_year": 2006,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "10:00 AM - 9:30 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Kids Zone Uniforms & Bags",
+    "categories": [
+      "clothing",
+      "stationery"
+    ],
+    "tagline": "School uniforms, bags and more",
+    "description": "Supplies uniform cloth, sweaters, raincoats and school bags for local schools. Stitching orders are taken in April and May.",
+    "owner_name": "Farida Begum",
+    "established_year": 2008,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 30,
+    "free_delivery_above": 1000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Sri Manjunatha Plumbing & Sanitary",
+    "categories": [
+      "plumbing"
+    ],
+    "tagline": "Sanitary ware and plumbing fittings",
+    "description": "Sanitary store stocking Jaquar, Parryware and Cera fittings. Helps customers choose taps and showers for bathroom renovations.",
+    "owner_name": "Manjunatha Swamy",
+    "established_year": 2000,
+    "offers_delivery": true,
+    "delivery_radius_km": 6,
+    "delivery_fee": 60,
+    "free_delivery_above": 1500,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Aqua Sanitary World",
+    "categories": [
+      "plumbing"
+    ],
+    "tagline": "Taps, valves and tank fittings",
+    "description": "Plumbing shop with budget PTMT taps and valves plus brass fittings. Plumbers call in orders for delivery to sites.",
+    "owner_name": "Syed Anwar",
+    "established_year": 2014,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 40,
+    "free_delivery_above": 1000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Jyothi Electricals",
+    "categories": [
+      "electrical"
+    ],
+    "tagline": "Lights, switches and festive lighting",
+    "description": "Electrical shop with LED bulbs, battens and switches. Serial lights and decorations fill the counter before Deepavali.",
+    "owner_name": "Jyothi Prakash",
+    "established_year": 1995,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Bright Light Electricals",
+    "categories": [
+      "electrical"
+    ],
+    "tagline": "MCBs, wires and wiring material",
+    "description": "Wiring material supplier to contractors with Polycab, Finolex and Havells stock. Offers quick delivery to construction sites.",
+    "owner_name": "Dinesh Patil",
+    "established_year": 2002,
+    "offers_delivery": true,
+    "delivery_radius_km": 7,
+    "delivery_fee": 50,
+    "free_delivery_above": 2000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "National Electronics",
+    "categories": [
+      "electronics"
+    ],
+    "tagline": "Home appliances and small electronics",
+    "description": "Electronics shop selling irons, mixer grinders, kettles and speakers. Also carries batteries and remotes for every brand.",
+    "owner_name": "Hari Narayanan",
+    "established_year": 1987,
+    "offers_delivery": true,
+    "delivery_radius_km": 6,
+    "delivery_fee": 40,
+    "free_delivery_above": 1500,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Cell World",
+    "categories": [
+      "mobile-accessories"
+    ],
+    "tagline": "Phone accessories for every model",
+    "description": "Mobile accessories store with covers and screen guards for most popular models. Fits tempered glass for free with purchase.",
+    "owner_name": "Naveen Reddy",
+    "established_year": 2015,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "10:00 AM - 10:00 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Mobile Planet",
+    "categories": [
+      "mobile-accessories",
+      "electronics"
+    ],
+    "tagline": "Power banks, earbuds and smart gadgets",
+    "description": "Accessories and gadget store stocking boAt, JBL, Ambrane and Xiaomi. Popular with college students for earbuds and power banks.",
+    "owner_name": "Vikram Singh",
+    "established_year": 2018,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 30,
+    "free_delivery_above": 700,
+    "opening_hours": "10:30 AM - 10:00 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Global Home Centre",
+    "categories": [
+      "home-supplies"
+    ],
+    "tagline": "Cleaning, storage and kitchenware",
+    "description": "Home store with mops, buckets, containers and cleaning liquids. Weekend offers on detergent packs.",
+    "owner_name": "Thomas Mathew",
+    "established_year": 2010,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 30,
+    "free_delivery_above": 800,
+    "opening_hours": "9:00 AM - 9:30 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Kalpana Steel & Plastics",
+    "categories": [
+      "home-supplies"
+    ],
+    "tagline": "Steel utensils, plastics and pooja items",
+    "description": "Steel and plasticware shop that also sells diyas, agarbatti and umbrellas in season. A favourite for wedding return gifts.",
+    "owner_name": "Kalpana Rao",
+    "established_year": 1993,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Sri Nandi General Stores",
+    "categories": [
+      "home-supplies",
+      "stationery",
+      "electrical"
+    ],
+    "tagline": "Daily needs, bulbs and school items",
+    "description": "Corner general store with cleaning items, basic stationery and bulbs. Open early for morning shoppers.",
+    "owner_name": "Nandish",
+    "established_year": 1999,
+    "offers_delivery": true,
+    "delivery_radius_km": 3,
+    "delivery_fee": 20,
+    "free_delivery_above": 500,
+    "opening_hours": "7:00 AM - 10:00 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Hanuman Tools & Hardware",
+    "categories": [
+      "hardware"
+    ],
+    "tagline": "Power tools and fasteners",
+    "description": "Tools shop with Bosch power tools, drill bits and fasteners. Carpenters and fabricators are regular customers.",
+    "owner_name": "Hanumanthappa",
+    "established_year": 2008,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "9:00 AM - 8:30 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Deepak Paints & Hardware",
+    "categories": [
+      "hardware"
+    ],
+    "tagline": "Paints, brushes and waterproofing",
+    "description": "Paint and hardware dealer with Asian Paints and Dr. Fixit products. Colour advice given for home repainting jobs.",
+    "owner_name": "Deepak Kulkarni",
+    "established_year": 2001,
+    "offers_delivery": true,
+    "delivery_radius_km": 6,
+    "delivery_fee": 50,
+    "free_delivery_above": 2000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Mahaveer Hardware, Sanitary & Electricals",
+    "categories": [
+      "hardware",
+      "plumbing",
+      "electrical"
+    ],
+    "tagline": "Building material under one roof",
+    "description": "Large general hardware store supplying builders with tools, pipes and wiring material. Bulk orders delivered the same day.",
+    "owner_name": "Mahaveer Chand Jain",
+    "established_year": 1986,
+    "offers_delivery": true,
+    "delivery_radius_km": 7,
+    "delivery_fee": 60,
+    "free_delivery_above": 2000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Shiva Auto Accessories",
+    "categories": [
+      "auto-parts"
+    ],
+    "tagline": "Car and bike accessories",
+    "description": "Accessories shop for car fresheners, wiper blades, bike covers and locks. Fits accessories while you wait.",
+    "owner_name": "Shivakumar",
+    "established_year": 2013,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "9:30 AM - 8:30 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Moto Care Spares",
+    "categories": [
+      "auto-parts"
+    ],
+    "tagline": "Engine oil and service parts",
+    "description": "Spares counter attached to a bike service centre with oils, filters and cables. Quick service parts for Honda and TVS scooters.",
+    "owner_name": "Praveen Kumar",
+    "established_year": 2017,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 30,
+    "free_delivery_above": 800,
+    "opening_hours": "8:30 AM - 8:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Sri Basaveshwara Auto Spares",
+    "categories": [
+      "auto-parts"
+    ],
+    "tagline": "Commuter bike parts at wholesale rates",
+    "description": "Wholesale-cum-retail spares shop supplying small garages across the city. Chain sprocket kits and tubes are fast movers.",
+    "owner_name": "Basavaraj Patil",
+    "established_year": 1995,
+    "offers_delivery": true,
+    "delivery_radius_km": 6,
+    "delivery_fee": 40,
+    "free_delivery_above": 1500,
+    "opening_hours": "9:00 AM - 8:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Sri Ram Footwear",
+    "categories": [
+      "footwear"
+    ],
+    "tagline": "Sandals and slippers for daily wear",
+    "description": "Footwear shop with sandals and slippers for men, women and kids. Offers exchange on wrong sizes within a week.",
+    "owner_name": "Ramachandra",
+    "established_year": 2004,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 30,
+    "free_delivery_above": 1000,
+    "opening_hours": "10:00 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Fashion Point Readymades",
+    "categories": [
+      "clothing",
+      "footwear"
+    ],
+    "tagline": "Casual wear and footwear",
+    "description": "Readymade store with t-shirts, jeans, kurtis and casual footwear. Popular with young shoppers on weekends.",
+    "owner_name": "Sameer Ahmed",
+    "established_year": 2012,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 40,
+    "free_delivery_above": 1200,
+    "opening_hours": "10:30 AM - 9:30 PM",
+    "closed_on": null
+  },
+  {
+    "name": "City Electronics & Home Appliances",
+    "categories": [
+      "electronics",
+      "electrical"
+    ],
+    "tagline": "Appliances, fans and lighting",
+    "description": "Appliance store stocking fans, geysers, irons and mixer grinders. Installation of fans and geysers can be arranged.",
+    "owner_name": "Sunil Menon",
+    "established_year": 1999,
+    "offers_delivery": true,
+    "delivery_radius_km": 7,
+    "delivery_fee": 60,
+    "free_delivery_above": 2000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Digital Zone",
+    "categories": [
+      "electronics",
+      "mobile-accessories"
+    ],
+    "tagline": "Gadgets, cameras and accessories",
+    "description": "Gadget shop selling pen drives, mice, calculators, Wi-Fi cameras and phone accessories. Helps set up smart plugs and cameras.",
+    "owner_name": "Karthik Iyer",
+    "established_year": 2019,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 30,
+    "free_delivery_above": 700,
+    "opening_hours": "10:30 AM - 9:30 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Sai Baba Super Bazaar",
+    "categories": [
+      "home-supplies",
+      "clothing",
+      "footwear"
+    ],
+    "tagline": "Value shopping for the whole family",
+    "description": "Mini department store with household items, innerwear, towels and chappals. Monthly value deals draw families from nearby areas.",
+    "owner_name": "Srinivasa Murthy",
+    "established_year": 2003,
+    "offers_delivery": true,
+    "delivery_radius_km": 4,
+    "delivery_fee": 30,
+    "free_delivery_above": 800,
+    "opening_hours": "9:00 AM - 10:00 PM",
+    "closed_on": null
+  },
+  {
+    "name": "Kamadhenu Home Essentials",
+    "categories": [
+      "home-supplies"
+    ],
+    "tagline": "Detergents, cleaners and repellents",
+    "description": "Home essentials shop with laundry, cleaning and mosquito repellent products. Stock of umbrellas and raincoats goes up in the monsoon.",
+    "owner_name": "Gowramma",
+    "established_year": 2011,
+    "offers_delivery": true,
+    "delivery_radius_km": 3,
+    "delivery_fee": 20,
+    "free_delivery_above": 500,
+    "opening_hours": "8:00 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Pragathi Electrical & Plumbing Works",
+    "categories": [
+      "electrical",
+      "plumbing"
+    ],
+    "tagline": "Repair material and service",
+    "description": "Shop plus service team for small electrical and plumbing repairs. Keeps MCBs, switches, taps and valves in stock.",
+    "owner_name": "Nagesh Hegde",
+    "established_year": 2006,
+    "offers_delivery": true,
+    "delivery_radius_km": 5,
+    "delivery_fee": 40,
+    "free_delivery_above": 1000,
+    "opening_hours": "9:30 AM - 9:00 PM",
+    "closed_on": "Sunday"
+  },
+  {
+    "name": "Supreme Traders",
+    "categories": [
+      "hardware",
+      "plumbing",
+      "electrical"
+    ],
+    "tagline": "Wholesale building hardware",
+    "description": "Wholesale trader for pipes, wires, fasteners and tools, also selling retail. Serves contractors across the city.",
+    "owner_name": "Rajesh Agarwal",
+    "established_year": 1981,
+    "offers_delivery": false,
+    "delivery_radius_km": null,
+    "delivery_fee": null,
+    "free_delivery_above": null,
+    "opening_hours": "9:00 AM - 8:00 PM",
+    "closed_on": "Sunday"
+  }
+]

@@ -1,0 +1,231 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  NearShop design tokens
+  - Warm neutral surfaces, ink-black primary actions, one brand accent (vermilion) used sparingly:
+    logo, map pins, the "Reserve" CTA, focus and selection.
+  - Semantic stock colours: success = in stock, warning = low stock, muted = out of stock.
+*/
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-display);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-ink: var(--warning-ink);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-ink: var(--info-ink);
+  --color-surface: var(--surface);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-soft: 0 1px 2px oklch(0.2 0.02 60 / 4%), 0 4px 16px -4px oklch(0.2 0.02 60 / 8%);
+  --shadow-lift: 0 2px 4px oklch(0.2 0.02 60 / 5%), 0 12px 32px -8px oklch(0.2 0.02 60 / 16%);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.003 75);
+  --surface: oklch(0.967 0.005 75);
+  --foreground: oklch(0.2 0.012 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.012 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.012 60);
+  --primary: oklch(0.22 0.012 60);
+  --primary-foreground: oklch(0.985 0.003 75);
+  --secondary: oklch(0.955 0.006 75);
+  --secondary-foreground: oklch(0.25 0.012 60);
+  --muted: oklch(0.955 0.006 75);
+  --muted-foreground: oklch(0.52 0.012 60);
+  --accent: oklch(0.95 0.008 75);
+  --accent-foreground: oklch(0.22 0.012 60);
+  --destructive: oklch(0.58 0.22 27);
+  --border: oklch(0.91 0.006 75);
+  --input: oklch(0.89 0.008 75);
+  --ring: oklch(0.64 0.19 38 / 55%);
+
+  --brand: oklch(0.63 0.2 36);
+  --brand-foreground: oklch(0.99 0.005 60);
+  --brand-soft: oklch(0.955 0.03 45);
+  --brand-ink: oklch(0.48 0.16 36);
+  --success: oklch(0.6 0.13 158);
+  --success-soft: oklch(0.95 0.04 160);
+  --success-ink: oklch(0.42 0.1 158);
+  --warning: oklch(0.77 0.15 75);
+  --warning-soft: oklch(0.96 0.05 85);
+  --warning-ink: oklch(0.48 0.11 60);
+  --info: oklch(0.6 0.12 245);
+  --info-soft: oklch(0.95 0.025 245);
+  --info-ink: oklch(0.45 0.12 250);
+
+  --chart-1: oklch(0.63 0.2 36);
+  --chart-2: oklch(0.62 0.1 190);
+  --chart-3: oklch(0.72 0.13 80);
+  --chart-4: oklch(0.55 0.12 280);
+  --chart-5: oklch(0.6 0.13 158);
+}
+
+.dark {
+  --background: oklch(0.155 0.006 60);
+  --surface: oklch(0.185 0.007 60);
+  --foreground: oklch(0.95 0.004 75);
+  --card: oklch(0.195 0.007 60);
+  --card-foreground: oklch(0.95 0.004 75);
+  --popover: oklch(0.21 0.008 60);
+  --popover-foreground: oklch(0.95 0.004 75);
+  --primary: oklch(0.95 0.004 75);
+  --primary-foreground: oklch(0.18 0.008 60);
+  --secondary: oklch(0.25 0.008 60);
+  --secondary-foreground: oklch(0.95 0.004 75);
+  --muted: oklch(0.24 0.008 60);
+  --muted-foreground: oklch(0.7 0.01 70);
+  --accent: oklch(0.26 0.009 60);
+  --accent-foreground: oklch(0.95 0.004 75);
+  --destructive: oklch(0.68 0.19 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.7 0.17 40 / 60%);
+
+  --brand: oklch(0.7 0.18 40);
+  --brand-foreground: oklch(0.16 0.01 50);
+  --brand-soft: oklch(0.3 0.06 40);
+  --brand-ink: oklch(0.8 0.13 45);
+  --success: oklch(0.7 0.14 158);
+  --success-soft: oklch(0.28 0.05 160);
+  --success-ink: oklch(0.82 0.11 158);
+  --warning: oklch(0.8 0.14 80);
+  --warning-soft: oklch(0.3 0.05 80);
+  --warning-ink: oklch(0.86 0.11 85);
+  --info: oklch(0.7 0.12 245);
+  --info-soft: oklch(0.28 0.05 250);
+  --info-ink: oklch(0.82 0.09 245);
+
+  --chart-1: oklch(0.7 0.18 40);
+  --chart-2: oklch(0.72 0.1 190);
+  --chart-3: oklch(0.8 0.13 80);
+  --chart-4: oklch(0.68 0.12 280);
+  --chart-5: oklch(0.7 0.14 158);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv11";
+  }
+  h1, h2, h3 {
+    @apply font-heading tracking-tight;
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--brand) 25%, transparent);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+  }
+  /* Subtle dotted paper texture used behind the hero and empty states */
+  .bg-dots {
+    background-image: radial-gradient(color-mix(in oklch, var(--foreground) 9%, transparent) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+}
+
+/* MapLibre tweaks so popups and controls follow the theme */
+.maplibregl-popup-content {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border-radius: calc(var(--radius) * 1.2);
+  box-shadow: var(--shadow-lift);
+  padding: 0;
+  border: 1px solid var(--border);
+}
+.maplibregl-popup-tip {
+  display: none;
+}
+.maplibregl-ctrl-group {
+  border-radius: calc(var(--radius) * 0.8) !important;
+  overflow: hidden;
+  box-shadow: var(--shadow-soft) !important;
+}
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

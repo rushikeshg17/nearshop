@@ -1,0 +1,74 @@
+"""Word2Vec reference model (academic baseline from the original NearShop concept).
+
+Trained on the product corpus itself (names, brands, tags, descriptions). It learns which
+words co-occur, then expands a query with nearby words before keyword search. It is shown
+side by side with the sentence-embedding search in the AI Lab so the two can be compared.
+"""
+from __future__ import annotations
+
+import threading
+import time
+
+from gensim.models import Word2Vec
+from gensim.utils import simple_preprocess
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.models import CatalogItem, Product
+
+MODEL_PATH = settings.model_dir / "word2vec.model"
+_model: Word2Vec | None = None
+_lock = threading.Lock()
+
+
+def _corpus(db: Session) -> list[list[str]]:
+    sentences: list[list[str]] = []
+    for c in db.scalars(select(CatalogItem)):
+        base = simple_preprocess(f"{c.name} {c.brand or ''} {c.subcategory or ''}")
+        tags = [simple_preprocess(t) for t in (c.tags or [])]
+        sentences.append(base + [w for t in tags for w in t])
+        for t in tags:  # each tag phrase next to the product words, so synonyms land close together
+            sentences.append(t + base[:4])
+        if c.description:
+            sentences.append(simple_preprocess(c.description))
+    for name, kw in db.execute(select(Product.name, Product.keywords).where(Product.catalog_item_id.is_(None))):
+        sentences.append(simple_preprocess(f"{name} {kw}"))
+    return [s for s in sentences if len(s) > 1]
+
+
+def train(db: Session) -> dict:
+    global _model
+    started = time.time()
+    sentences = _corpus(db)
+    model = Word2Vec(sentences=sentences, vector_size=96, window=6, min_count=1, sg=1, epochs=60, workers=2, seed=7)
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    model.save(str(MODEL_PATH))
+    with _lock:
+        _model = model
+    return {
+        "sentences": len(sentences),
+        "vocabulary": len(model.wv),
+        "duration_ms": int((time.time() - started) * 1000),
+    }
+
+
+def _load() -> Word2Vec | None:
+    global _model
+    if _model is None and MODEL_PATH.exists():
+        with _lock:
+            if _model is None:
+                _model = Word2Vec.load(str(MODEL_PATH))
+    return _model
+
+
+def expand(query: str, topn: int = 4, min_sim: float = 0.55) -> list[str]:
+    model = _load()
+    tokens = simple_preprocess(query)
+    if model is None:
+        return tokens
+    out = list(tokens)
+    for tok in tokens:
+        if tok in model.wv:
+            out += [w for w, s in model.wv.most_similar(tok, topn=topn) if s >= min_sim]
+    return list(dict.fromkeys(out))

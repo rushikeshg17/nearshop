@@ -1,0 +1,677 @@
+{
+  "ballari": {
+    "name": "Ballari",
+    "state": "Karnataka",
+    "center": {
+      "lat": 15.148,
+      "lng": 76.923
+    },
+    "default_zoom": 13,
+    "localities": [
+      {
+        "name": "Satyanarayana Pete",
+        "lat": 15.14858,
+        "lng": 76.93885,
+        "pincode": "583103"
+      },
+      {
+        "name": "Court Road",
+        "lat": 15.14848,
+        "lng": 76.92966,
+        "pincode": "583101"
+      },
+      {
+        "name": "Station Road",
+        "lat": 15.1449,
+        "lng": 76.924,
+        "pincode": "583101"
+      },
+      {
+        "name": "Parvathi Nagar",
+        "lat": 15.1523,
+        "lng": 76.9253,
+        "pincode": "583101"
+      },
+      {
+        "name": "Renuka Nagar",
+        "lat": 15.16184,
+        "lng": 76.92708,
+        "pincode": "583103"
+      },
+      {
+        "name": "Gandhinagara",
+        "lat": 15.15795,
+        "lng": 76.93757,
+        "pincode": "583103"
+      },
+      {
+        "name": "Basaveshwara Nagar",
+        "lat": 15.1539,
+        "lng": 76.9428,
+        "pincode": "583103"
+      },
+      {
+        "name": "Patel Nagar",
+        "lat": 15.1454,
+        "lng": 76.9415,
+        "pincode": "583103"
+      },
+      {
+        "name": "Bandimot",
+        "lat": 15.14005,
+        "lng": 76.94168,
+        "pincode": "583103"
+      },
+      {
+        "name": "Rupanagudi Road",
+        "lat": 15.1338,
+        "lng": 76.9421,
+        "pincode": "583103"
+      },
+      {
+        "name": "Kappagal Road",
+        "lat": 15.1658,
+        "lng": 76.9404,
+        "pincode": "583103"
+      },
+      {
+        "name": "Sanganakal Road",
+        "lat": 15.1692,
+        "lng": 76.9641,
+        "pincode": "583103"
+      },
+      {
+        "name": "Fort Area",
+        "lat": 15.1487,
+        "lng": 76.9104,
+        "pincode": "583102"
+      },
+      {
+        "name": "Cowl Bazar",
+        "lat": 15.13649,
+        "lng": 76.89829,
+        "pincode": "583102"
+      },
+      {
+        "name": "Radio Park",
+        "lat": 15.1431,
+        "lng": 76.9031,
+        "pincode": "583102"
+      },
+      {
+        "name": "Bandihatti",
+        "lat": 15.13281,
+        "lng": 76.89022
+      },
+      {
+        "name": "Infantry Road",
+        "lat": 15.1536,
+        "lng": 76.9063,
+        "pincode": "583104"
+      },
+      {
+        "name": "Sudha Cross",
+        "lat": 15.15147,
+        "lng": 76.90083,
+        "pincode": "583104"
+      },
+      {
+        "name": "Cantonment",
+        "lat": 15.15718,
+        "lng": 76.89061,
+        "pincode": "583104"
+      },
+      {
+        "name": "Havambhavi",
+        "lat": 15.17143,
+        "lng": 76.91217
+      },
+      {
+        "name": "Siruguppa Road",
+        "lat": 15.16659,
+        "lng": 76.91343
+      }
+    ]
+  },
+  "mysuru": {
+    "name": "Mysuru",
+    "state": "Karnataka",
+    "center": {
+      "lat": 12.3052,
+      "lng": 76.6552
+    },
+    "default_zoom": 13,
+    "localities": [
+      {
+        "name": "Vijayanagar 2nd Stage",
+        "lat": 12.3338,
+        "lng": 76.6128,
+        "pincode": "570017"
+      },
+      {
+        "name": "Kuvempunagar",
+        "lat": 12.2862,
+        "lng": 76.6257,
+        "pincode": "570023"
+      },
+      {
+        "name": "Saraswathipuram",
+        "lat": 12.2985,
+        "lng": 76.6284,
+        "pincode": "570009"
+      },
+      {
+        "name": "Gokulam",
+        "lat": 12.3261,
+        "lng": 76.6283,
+        "pincode": "570002"
+      },
+      {
+        "name": "Jayalakshmipuram",
+        "lat": 12.3222,
+        "lng": 76.6223,
+        "pincode": "570012"
+      },
+      {
+        "name": "Devaraja Mohalla",
+        "lat": 12.3134,
+        "lng": 76.6528,
+        "pincode": "570001"
+      },
+      {
+        "name": "Mandi Mohalla",
+        "lat": 12.3169,
+        "lng": 76.6539,
+        "pincode": "570021"
+      },
+      {
+        "name": "Nazarbad",
+        "lat": 12.3093,
+        "lng": 76.6658,
+        "pincode": "570010"
+      },
+      {
+        "name": "Bannimantap",
+        "lat": 12.3326,
+        "lng": 76.6517,
+        "pincode": "570015"
+      },
+      {
+        "name": "Hebbal",
+        "lat": 12.3485,
+        "lng": 76.6073,
+        "pincode": "570016"
+      },
+      {
+        "name": "Metagalli",
+        "lat": 12.3477,
+        "lng": 76.6298,
+        "pincode": "570016"
+      },
+      {
+        "name": "Bogadi",
+        "lat": 12.3042,
+        "lng": 76.5996,
+        "pincode": "570026"
+      },
+      {
+        "name": "Srirampura",
+        "lat": 12.2637,
+        "lng": 76.6228,
+        "pincode": "570023"
+      },
+      {
+        "name": "Lakshmipuram",
+        "lat": 12.296,
+        "lng": 76.6456,
+        "pincode": "570004"
+      },
+      {
+        "name": "Chamarajapuram",
+        "lat": 12.2989,
+        "lng": 76.6411,
+        "pincode": "570005"
+      },
+      {
+        "name": "Agrahara",
+        "lat": 12.2975,
+        "lng": 76.6559,
+        "pincode": "570004"
+      },
+      {
+        "name": "Yadavagiri",
+        "lat": 12.3285,
+        "lng": 76.6391,
+        "pincode": "570020"
+      },
+      {
+        "name": "Hootagalli",
+        "lat": 12.3375,
+        "lng": 76.5935,
+        "pincode": "570018"
+      },
+      {
+        "name": "JP Nagar",
+        "lat": 12.2656,
+        "lng": 76.6465,
+        "pincode": "570031"
+      },
+      {
+        "name": "Ramakrishnanagar",
+        "lat": 12.2927,
+        "lng": 76.6167,
+        "pincode": "570022"
+      },
+      {
+        "name": "Dattagalli",
+        "lat": 12.2832,
+        "lng": 76.6061,
+        "pincode": "570022"
+      },
+      {
+        "name": "Siddhartha Layout",
+        "lat": 12.295,
+        "lng": 76.6735,
+        "pincode": "570011"
+      },
+      {
+        "name": "Alanahalli",
+        "lat": 12.2974,
+        "lng": 76.6999,
+        "pincode": "570028"
+      },
+      {
+        "name": "Sayyaji Rao Road",
+        "lat": 12.3125,
+        "lng": 76.6515,
+        "pincode": "570024"
+      }
+    ]
+  },
+  "hubballi": {
+    "name": "Hubballi",
+    "state": "Karnataka",
+    "center": {
+      "lat": 15.3518,
+      "lng": 75.138
+    },
+    "default_zoom": 13,
+    "localities": [
+      {
+        "name": "Vidyanagar",
+        "lat": 15.3638,
+        "lng": 75.1276,
+        "pincode": "580021"
+      },
+      {
+        "name": "Gokul Road",
+        "lat": 15.351,
+        "lng": 75.1191,
+        "pincode": "580030"
+      },
+      {
+        "name": "Keshwapur",
+        "lat": 15.362,
+        "lng": 75.1518,
+        "pincode": "580023"
+      },
+      {
+        "name": "Deshpande Nagar",
+        "lat": 15.3598,
+        "lng": 75.1363,
+        "pincode": "580029"
+      },
+      {
+        "name": "Old Hubli",
+        "lat": 15.3405,
+        "lng": 75.1376,
+        "pincode": "580024"
+      },
+      {
+        "name": "Unkal",
+        "lat": 15.3796,
+        "lng": 75.1152,
+        "pincode": "580031"
+      },
+      {
+        "name": "Navanagar",
+        "lat": 15.3938,
+        "lng": 75.0821,
+        "pincode": "580025"
+      },
+      {
+        "name": "Durgad Bail",
+        "lat": 15.3432,
+        "lng": 75.1428,
+        "pincode": "580020"
+      },
+      {
+        "name": "Koppikar Road",
+        "lat": 15.3484,
+        "lng": 75.142,
+        "pincode": "580020"
+      },
+      {
+        "name": "Akshay Colony",
+        "lat": 15.3608,
+        "lng": 75.1082,
+        "pincode": "580021"
+      },
+      {
+        "name": "Lingaraj Nagar",
+        "lat": 15.371,
+        "lng": 75.1151,
+        "pincode": "580031"
+      },
+      {
+        "name": "Hosur",
+        "lat": 15.3538,
+        "lng": 75.1294,
+        "pincode": "580021"
+      },
+      {
+        "name": "Kamaripet",
+        "lat": 15.3476,
+        "lng": 75.1379,
+        "pincode": "580023"
+      },
+      {
+        "name": "Nehru Nagar",
+        "lat": 15.352,
+        "lng": 75.0967,
+        "pincode": "580030"
+      }
+    ]
+  },
+  "vijayawada": {
+    "name": "Vijayawada",
+    "state": "Andhra Pradesh",
+    "center": {
+      "lat": 16.5062,
+      "lng": 80.648
+    },
+    "default_zoom": 13,
+    "localities": [
+      {
+        "name": "Benz Circle",
+        "lat": 16.4984,
+        "lng": 80.6527,
+        "pincode": "520010"
+      },
+      {
+        "name": "Labbipet",
+        "lat": 16.5042,
+        "lng": 80.6418,
+        "pincode": "520010"
+      },
+      {
+        "name": "Governorpet",
+        "lat": 16.5125,
+        "lng": 80.6207,
+        "pincode": "520002"
+      },
+      {
+        "name": "Patamata",
+        "lat": 16.4949,
+        "lng": 80.6625,
+        "pincode": "520010"
+      },
+      {
+        "name": "Gunadala",
+        "lat": 16.5223,
+        "lng": 80.6598,
+        "pincode": "520004"
+      },
+      {
+        "name": "Moghalrajpuram",
+        "lat": 16.5128,
+        "lng": 80.6401,
+        "pincode": "520010"
+      },
+      {
+        "name": "Ajit Singh Nagar",
+        "lat": 16.5395,
+        "lng": 80.6405,
+        "pincode": "520015"
+      },
+      {
+        "name": "Bhavanipuram",
+        "lat": 16.5261,
+        "lng": 80.5931,
+        "pincode": "520012"
+      },
+      {
+        "name": "Suryaraopet",
+        "lat": 16.5135,
+        "lng": 80.6324,
+        "pincode": "520002"
+      },
+      {
+        "name": "Auto Nagar",
+        "lat": 16.5018,
+        "lng": 80.676,
+        "pincode": "520007"
+      },
+      {
+        "name": "Kanuru",
+        "lat": 16.484,
+        "lng": 80.6859,
+        "pincode": "520007"
+      },
+      {
+        "name": "Machavaram",
+        "lat": 16.5189,
+        "lng": 80.6492,
+        "pincode": "520004"
+      },
+      {
+        "name": "One Town",
+        "lat": 16.5187,
+        "lng": 80.6128,
+        "pincode": "520001"
+      },
+      {
+        "name": "Poranki",
+        "lat": 16.4763,
+        "lng": 80.7069,
+        "pincode": "521137"
+      }
+    ]
+  },
+  "coimbatore": {
+    "name": "Coimbatore",
+    "state": "Tamil Nadu",
+    "center": {
+      "lat": 11.0168,
+      "lng": 76.9558
+    },
+    "default_zoom": 13,
+    "localities": [
+      {
+        "name": "Gandhipuram",
+        "lat": 11.0183,
+        "lng": 76.9678,
+        "pincode": "641012"
+      },
+      {
+        "name": "RS Puram",
+        "lat": 11.008,
+        "lng": 76.9502,
+        "pincode": "641002"
+      },
+      {
+        "name": "Peelamedu",
+        "lat": 11.0278,
+        "lng": 76.9986,
+        "pincode": "641004"
+      },
+      {
+        "name": "Saibaba Colony",
+        "lat": 11.0243,
+        "lng": 76.9448,
+        "pincode": "641011"
+      },
+      {
+        "name": "Town Hall",
+        "lat": 10.9968,
+        "lng": 76.9556,
+        "pincode": "641001"
+      },
+      {
+        "name": "Ukkadam",
+        "lat": 10.9913,
+        "lng": 76.9628,
+        "pincode": "641001"
+      },
+      {
+        "name": "Singanallur",
+        "lat": 11.0029,
+        "lng": 77.0235,
+        "pincode": "641005"
+      },
+      {
+        "name": "Ramanathapuram",
+        "lat": 10.9948,
+        "lng": 76.9921,
+        "pincode": "641045"
+      },
+      {
+        "name": "Ganapathy",
+        "lat": 11.0383,
+        "lng": 76.9781,
+        "pincode": "641006"
+      },
+      {
+        "name": "Saravanampatti",
+        "lat": 11.0747,
+        "lng": 77.0027,
+        "pincode": "641035"
+      },
+      {
+        "name": "Vadavalli",
+        "lat": 11.0253,
+        "lng": 76.9051,
+        "pincode": "641041"
+      },
+      {
+        "name": "Race Course",
+        "lat": 11.0011,
+        "lng": 76.978,
+        "pincode": "641018"
+      },
+      {
+        "name": "Kavundampalayam",
+        "lat": 11.0452,
+        "lng": 76.9474,
+        "pincode": "641030"
+      },
+      {
+        "name": "Sundarapuram",
+        "lat": 10.9566,
+        "lng": 76.9726,
+        "pincode": "641024"
+      }
+    ]
+  },
+  "nashik": {
+    "name": "Nashik",
+    "state": "Maharashtra",
+    "center": {
+      "lat": 19.9975,
+      "lng": 73.7898
+    },
+    "default_zoom": 13,
+    "localities": [
+      {
+        "name": "College Road",
+        "lat": 20.0066,
+        "lng": 73.7609,
+        "pincode": "422005"
+      },
+      {
+        "name": "Gangapur Road",
+        "lat": 20.0125,
+        "lng": 73.748,
+        "pincode": "422013"
+      },
+      {
+        "name": "Panchavati",
+        "lat": 20.0067,
+        "lng": 73.7936,
+        "pincode": "422003"
+      },
+      {
+        "name": "Nashik Road",
+        "lat": 19.9505,
+        "lng": 73.8389,
+        "pincode": "422101"
+      },
+      {
+        "name": "CIDCO",
+        "lat": 19.9682,
+        "lng": 73.7599,
+        "pincode": "422009"
+      },
+      {
+        "name": "Satpur",
+        "lat": 20.0005,
+        "lng": 73.7377,
+        "pincode": "422007"
+      },
+      {
+        "name": "Indira Nagar",
+        "lat": 19.9735,
+        "lng": 73.7812,
+        "pincode": "422009"
+      },
+      {
+        "name": "Dwarka",
+        "lat": 19.9933,
+        "lng": 73.8027,
+        "pincode": "422011"
+      },
+      {
+        "name": "Mahatma Nagar",
+        "lat": 19.996,
+        "lng": 73.7532,
+        "pincode": "422007"
+      },
+      {
+        "name": "Canada Corner",
+        "lat": 20.0025,
+        "lng": 73.7697,
+        "pincode": "422005"
+      },
+      {
+        "name": "Ashok Stambh",
+        "lat": 20.0068,
+        "lng": 73.7849,
+        "pincode": "422001"
+      },
+      {
+        "name": "Pathardi Phata",
+        "lat": 19.9567,
+        "lng": 73.7581,
+        "pincode": "422010"
+      },
+      {
+        "name": "Jail Road",
+        "lat": 19.9704,
+        "lng": 73.8401,
+        "pincode": "422101"
+      },
+      {
+        "name": "Govind Nagar",
+        "lat": 19.9833,
+        "lng": 73.7793,
+        "pincode": "422009"
+      },
+      {
+        "name": "Bhadrakali",
+        "lat": 20.0019,
+        "lng": 73.7895,
+        "pincode": "422001"
+      }
+    ]
+  }
+}

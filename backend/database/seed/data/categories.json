@@ -1,0 +1,72 @@
+[
+  {
+    "slug": "electronics",
+    "name": "Electronics",
+    "icon": "Cpu",
+    "description": "Earphones, speakers, trimmers, irons, batteries, remotes and small gadgets.",
+    "color_hue": 245
+  },
+  {
+    "slug": "hardware",
+    "name": "Hardware",
+    "icon": "Hammer",
+    "description": "Hand tools, fasteners, locks, adhesives and painting supplies.",
+    "color_hue": 50
+  },
+  {
+    "slug": "plumbing",
+    "name": "Plumbing",
+    "icon": "Faucet",
+    "description": "Pipes, fittings, taps, valves and bathroom fittings.",
+    "color_hue": 205
+  },
+  {
+    "slug": "auto-parts",
+    "name": "Auto Parts",
+    "icon": "Motorbike",
+    "description": "Engine oil, spares, helmets and accessories for bikes, scooters and cars.",
+    "color_hue": 22
+  },
+  {
+    "slug": "footwear",
+    "name": "Footwear",
+    "icon": "Footprints",
+    "description": "Chappals, sandals, school shoes, sports shoes and shoe care.",
+    "color_hue": 350
+  },
+  {
+    "slug": "clothing",
+    "name": "Clothing",
+    "icon": "Shirt",
+    "description": "Everyday wear, ethnic wear, innerwear, uniforms and rainwear.",
+    "color_hue": 315
+  },
+  {
+    "slug": "stationery",
+    "name": "Stationery",
+    "icon": "PencilLine",
+    "description": "Notebooks, pens, pencils, art supplies, files and school bags.",
+    "color_hue": 165
+  },
+  {
+    "slug": "mobile-accessories",
+    "name": "Mobile Accessories",
+    "icon": "Smartphone",
+    "description": "Chargers, cables, screen guards, covers, power banks and memory cards.",
+    "color_hue": 280
+  },
+  {
+    "slug": "electrical",
+    "name": "Electrical",
+    "icon": "Zap",
+    "description": "Wires, MCBs, switches, LED lights, fans and water heaters.",
+    "color_hue": 90
+  },
+  {
+    "slug": "home-supplies",
+    "name": "Home Supplies",
+    "icon": "House",
+    "description": "Cleaning, laundry, kitchen, pooja and monsoon essentials for the home.",
+    "color_hue": 130
+  }
+]
