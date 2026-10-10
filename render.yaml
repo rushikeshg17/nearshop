@@ -1,0 +1,28 @@
+# Render Blueprint for the NearShop API (the frontend is deployed on Vercel).
+# Render dashboard > New > Blueprint > pick this repository. It asks for NEARSHOP_MONGODB_URI.
+services:
+  - type: web
+    name: nearshop-api
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    startCommand: uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: NEARSHOP_ENVIRONMENT
+        value: production
+      - key: NEARSHOP_SECRET_KEY
+        generateValue: true # signs login cookies; Render creates a random one
+      - key: NEARSHOP_MONGODB_URI
+        sync: false # secret: paste your Atlas connection string in the dashboard
+      - key: NEARSHOP_MONGODB_DB
+        value: nearshop
+      - key: NEARSHOP_COOKIE_SECURE
+        value: "true"
+      - key: NEARSHOP_SEED_CITY
+        value: ballari
