@@ -98,7 +98,9 @@ export function ShopMap({
         cooperativeGestures: false,
       });
       if (interactive) m.addControl(new lib.NavigationControl({ showCompass: false }), "top-right");
-      m.on("load", () => !cancelled && setLoaded(true));
+      // Ready as soon as the style is in: pins and clicks must not wait for every map tile to download,
+      // or the map looks dead on a slow connection.
+      m.once("style.load", () => !cancelled && setLoaded(true));
       m.on("click", (e) => onMapClickRef.current?.({ lat: e.lngLat.lat, lng: e.lngLat.lng }));
       map.current = m;
     })();
