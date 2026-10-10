@@ -1,5 +1,6 @@
 """NearShop API entry point."""
 import logging
+import re
 import threading
 from contextlib import asynccontextmanager
 
@@ -81,6 +82,18 @@ async def validation_handler(_: Request, exc: RequestValidationError):
 @app.get("/api/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/api/health/db")
+def health_db():
+    """Can the API reach MongoDB? Reports the kind of failure, never the connection string."""
+    try:
+        db = Database()
+        db.mongo.command("ping")
+        return {"ok": True, "database": db.mongo.name, "shops": db.shops.count()}
+    except Exception as exc:
+        detail = re.sub(r"//[^@/\s]*@", "//***@", str(exc))[:300]  # never echo credentials
+        return JSONResponse({"ok": False, "error": type(exc).__name__, "detail": detail}, status_code=503)
 
 
 app.include_router(api_router)
