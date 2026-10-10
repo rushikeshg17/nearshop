@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import TYPE_CHECKING
 
-from gensim.models import Word2Vec
-from gensim.utils import simple_preprocess
+if TYPE_CHECKING:  # gensim is imported on use: it stays out of the API's serving memory
+    from gensim.models import Word2Vec
 
 from app.core.config import settings
 from app.core.database import Database
@@ -21,6 +22,8 @@ _lock = threading.Lock()
 
 
 def _corpus(db: Database) -> list[list[str]]:
+    from gensim.utils import simple_preprocess
+
     sentences: list[list[str]] = []
     for c in db.catalog_items.find():
         base = simple_preprocess(f"{c.name} {c.brand or ''} {c.subcategory or ''}")
@@ -36,6 +39,8 @@ def _corpus(db: Database) -> list[list[str]]:
 
 
 def train(db: Database) -> dict:
+    from gensim.models import Word2Vec
+
     global _model
     started = time.time()
     sentences = _corpus(db)
@@ -54,6 +59,8 @@ def train(db: Database) -> dict:
 def _load() -> Word2Vec | None:
     global _model
     if _model is None and MODEL_PATH.exists():
+        from gensim.models import Word2Vec
+
         with _lock:
             if _model is None:
                 _model = Word2Vec.load(str(MODEL_PATH))
@@ -62,9 +69,11 @@ def _load() -> Word2Vec | None:
 
 def expand(query: str, topn: int = 4, min_sim: float = 0.55) -> list[str]:
     model = _load()
+    if model is None:  # not trained on this machine yet: plain words, and gensim is never loaded
+        return query.lower().split()
+    from gensim.utils import simple_preprocess
+
     tokens = simple_preprocess(query)
-    if model is None:
-        return tokens
     out = list(tokens)
     for tok in tokens:
         if tok in model.wv:

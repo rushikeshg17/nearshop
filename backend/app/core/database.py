@@ -32,6 +32,7 @@ client: MongoClient = MongoClient(
     serverSelectionTimeoutMS=15000,
     retryWrites=True,
     tz_aware=False,  # everything is stored and handled as naive UTC
+    connect=False,  # resolve and connect on first use, so a slow DNS lookup cannot stop the API from starting
 )
 
 log = logging.getLogger(__name__)

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import io
 import re
+from typing import TYPE_CHECKING
 
-import pandas as pd
 from rapidfuzz import fuzz, process
 
 from app.core.database import Database
@@ -19,6 +19,9 @@ from app.models import Product, Shop
 from app.services.inventory import apply_bulk
 from app.services.loaders import categories as load_categories
 from app.services.loaders import with_category
+
+if TYPE_CHECKING:  # pandas is imported on use: it stays out of the API's serving memory
+    import pandas as pd
 
 MAX_ROWS = 2000
 MAX_BYTES = 5 * 1024 * 1024
@@ -65,13 +68,15 @@ def _detect_columns(columns: list[str]) -> dict[str, str]:
 
 
 def _number(v) -> float | None:
-    if v is None or (isinstance(v, float) and pd.isna(v)):
+    if v is None or (isinstance(v, float) and v != v):  # NaN is the only value not equal to itself
         return None
     m = re.search(r"-?\d+(?:\.\d+)?", str(v).replace(",", ""))
     return float(m.group()) if m else None
 
 
 def read_table(data: bytes, filename: str) -> pd.DataFrame:
+    import pandas as pd
+
     if len(data) > MAX_BYTES:
         raise AppError("File is larger than 5 MB. Split it or export only items in stock.", code="file_too_large")
     name = filename.lower()

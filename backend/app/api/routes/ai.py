@@ -4,7 +4,6 @@ import threading
 from fastapi import APIRouter, Query
 
 from app.ai import word2vec_ref
-from app.ai.pipeline import train_all
 from app.ai.semantic_index import index
 from app.core.database import Database
 from app.core.deps import DB, AdminUser
@@ -75,6 +74,10 @@ def retrain(_: AdminUser):
         return {"started": False, "message": "Training is already running"}
 
     def job():
+        # Imported here: the training libraries (scikit-learn, pandas, gensim, mlxtend) are only
+        # loaded when someone actually retrains, not in every API process.
+        from app.ai.pipeline import train_all
+
         _training.set()
         try:
             train_all(Database())

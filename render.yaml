@@ -7,7 +7,10 @@ services:
     plan: free
     region: singapore
     rootDir: backend
-    buildCommand: pip install uv && uv sync --frozen --no-dev
+    # The search model (90 MB) is downloaded while building, so a cold start does not wait for it.
+    buildCommand: >-
+      pip install uv && uv sync --frozen --no-dev &&
+      uv run --no-dev python -c "from app.ai.embeddings import get_provider; get_provider()"
     startCommand: uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     autoDeploy: true

@@ -9,10 +9,6 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 
-import pandas as pd
-from mlxtend.frequent_patterns import apriori, association_rules
-from mlxtend.preprocessing import TransactionEncoder
-
 from app.core.database import Database
 from app.models import AssociationRule, ModelRun
 
@@ -22,6 +18,10 @@ MIN_LIFT = 1.5
 
 
 def train(db: Database) -> ModelRun:
+    import pandas as pd  # imported on use: training libraries stay out of the API's serving memory
+    from mlxtend.frequent_patterns import apriori, association_rules
+    from mlxtend.preprocessing import TransactionEncoder
+
     started = time.time()
     rows = db.sales_history.find_raw({"catalog_item_id": {"$ne": None}},
                                      {"_id": 0, "basket_id": 1, "catalog_item_id": 1, "is_demo": 1})
