@@ -125,7 +125,8 @@ def search_compare(db: DB, q: str = Query(..., min_length=2, max_length=120), li
         "query": q,
         "normalized": norm,
         "methods": [
-            {"key": "keyword", "title": "Keyword only (BM25)", "note": "Exact words in the listing.",
+            {"key": "keyword", "title": "Keyword only (text index)",
+             "note": "Exact words in the listing, scored by MongoDB's weighted text index.",
              "results": top_unique(kw)},
             {"key": "word2vec", "title": "Word2Vec expansion", "note": f"Expanded to: {', '.join(w2v_terms)}",
              "results": top_unique(w2v)},
